@@ -20,24 +20,28 @@ enum class TextTranslators(val label: String) {
     GEMINI("Gemini AI [API KEY]"),
     OPENROUTER("OpenRouter [API KEY]");
 
-    fun build(pref : TranslationPreferences= Injekt.get(), fromLang: TextRecognizerLanguage = TextRecognizerLanguage.fromPref(pref.translateFromLanguage()), toLang: TextTranslatorLanguage = TextTranslatorLanguage.fromPref(pref.translateToLanguage())): TextTranslator{
-        val maxOutputTokens=pref.translationEngineMaxOutputTokens().get().toIntOrNull()?:8192
-        val temperature=pref.translationEngineTemperature().get().toFloatOrNull()?:1.0f
-        val modelName=pref.translationEngineModel().get()
-        val apiKey=pref.translationEngineApiKey().get()
+    fun build(
+        pref: TranslationPreferences = Injekt.get(),
+        fromLang: TextRecognizerLanguage = TextRecognizerLanguage.fromPref(pref.translateFromLanguage()),
+        toLang: TextTranslatorLanguage = TextTranslatorLanguage.fromPref(pref.translateToLanguage()),
+    ): TextTranslator {
+        val maxOutputTokens = pref.translationEngineMaxOutputTokens().get().toIntOrNull() ?: 8192
+        val temperature = pref.translationEngineTemperature().get().toFloatOrNull() ?: 1.0f
+        val modelName = pref.translationEngineModel().get()
+        val apiKey = pref.translationEngineApiKey().get()
         val systemPrompt = pref.translationEngineSystemPrompt().get()
-        
-        return when(this){
+
+        return when (this) {
             MLKIT -> MLKitTranslator(fromLang, toLang)
-            GOOGLE ->GoogleTranslator(fromLang, toLang)
-            GEMINI -> GeminiTranslator(fromLang, toLang,apiKey,modelName,maxOutputTokens,temperature, systemPrompt)
-            OPENROUTER -> OpenRouterTranslator(fromLang, toLang,apiKey,modelName,maxOutputTokens,temperature, systemPrompt)
+            GOOGLE -> GoogleTranslator(fromLang, toLang)
+            GEMINI -> GeminiTranslator(fromLang, toLang, apiKey, modelName, maxOutputTokens, temperature, systemPrompt)
+            OPENROUTER -> OpenRouterTranslator(fromLang, toLang, apiKey, modelName, maxOutputTokens, temperature, systemPrompt)
         }
     }
 
     companion object {
         fun fromPref(pref: Preference<Int>): TextTranslators {
-            var translator = entries.getOrNull(pref.get())
+            val translator = entries.getOrNull(pref.get())
             if (translator == null) {
                 pref.set(0)
                 return MLKIT

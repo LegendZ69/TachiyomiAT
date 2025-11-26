@@ -188,7 +188,7 @@ enum class TextTranslatorLanguage(val code: String, val label: String) {
     YORUBA("yo", "Yoruba"),
     ZHUANG_CHUANG("za", "Zhuang; Chuang"),
     CHINESESIM("zh", "Chinese Simplified"),
-    CHINESETRAD("zh", "Chinese Traditional"),
+    CHINESETRAD("zh-TW", "Chinese Traditional"),
     ZULU("zu", "Zulu"),
     ;
 
