@@ -37,6 +37,8 @@ class TranslationManager(
 
     val queueState
         get() = translator.queueState
+        
+    private val json = Json { ignoreUnknownKeys = true }
 
     fun translatorStart() = translator.start()
     fun translatorStop(reason: String? = null) = translator.stop(reason)
@@ -112,7 +114,7 @@ class TranslationManager(
         file: UniFile,
     ): Map<String, PageTranslation> {
         try {
-            return Json.decodeFromStream<Map<String, PageTranslation>>(file.openInputStream())
+            return json.decodeFromStream<Map<String, PageTranslation>>(file.openInputStream())
         } catch (e: Exception) {
             file.delete()
         }

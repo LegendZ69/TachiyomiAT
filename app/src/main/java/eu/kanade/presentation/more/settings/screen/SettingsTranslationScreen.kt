@@ -3,6 +3,8 @@ package eu.kanade.presentation.more.settings.screen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.translation.data.TranslationFont
 import eu.kanade.translation.recognizer.TextRecognizerLanguage
@@ -38,6 +40,7 @@ object SettingsTranslationScreen : SearchableSettings {
             getTranslationLangGroup(translationPreferences),
             getTranslatioEngineGroup(translationPreferences),
             getTranslatioAdvancedGroup(translationPreferences),
+            getLogsGroup(),
         )
     }
 
@@ -104,6 +107,26 @@ object SettingsTranslationScreen : SearchableSettings {
                 Preference.PreferenceItem.EditTextPreference(
                     pref = translationPreferences.translationEngineMaxOutputTokens(),
                     title = stringResource(ATMR.strings.pref_engine_max_output),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    pref = translationPreferences.translationEngineSystemPrompt(),
+                    title = stringResource(ATMR.strings.pref_engine_system_prompt),
+                ),
+            ),
+        )
+    }
+
+    @Composable
+    private fun getLogsGroup(): Preference.PreferenceGroup {
+        val navigator = LocalNavigator.currentOrThrow
+        return Preference.PreferenceGroup(
+            title = stringResource(ATMR.strings.pref_group_logs),
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(ATMR.strings.pref_view_logs),
+                    onClick = {
+                        navigator.push(SettingsTranslationLogsScreen)
+                    },
                 ),
             ),
         )

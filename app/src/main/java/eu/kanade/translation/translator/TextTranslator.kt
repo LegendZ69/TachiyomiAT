@@ -21,15 +21,17 @@ enum class TextTranslators(val label: String) {
     OPENROUTER("OpenRouter [API KEY]");
 
     fun build(pref : TranslationPreferences= Injekt.get(), fromLang: TextRecognizerLanguage = TextRecognizerLanguage.fromPref(pref.translateFromLanguage()), toLang: TextTranslatorLanguage = TextTranslatorLanguage.fromPref(pref.translateToLanguage())): TextTranslator{
-        val maxOutputTokens=pref.translationEngineMaxOutputTokens().get().toIntOrNull()?:8914
+        val maxOutputTokens=pref.translationEngineMaxOutputTokens().get().toIntOrNull()?:8192
         val temperature=pref.translationEngineTemperature().get().toFloatOrNull()?:1.0f
         val modelName=pref.translationEngineModel().get()
         val apiKey=pref.translationEngineApiKey().get()
+        val systemPrompt = pref.translationEngineSystemPrompt().get()
+        
         return when(this){
             MLKIT -> MLKitTranslator(fromLang, toLang)
             GOOGLE ->GoogleTranslator(fromLang, toLang)
-            GEMINI -> GeminiTranslator(fromLang, toLang,apiKey,modelName,maxOutputTokens,temperature)
-            OPENROUTER -> OpenRouterTranslator(fromLang, toLang,apiKey,modelName,maxOutputTokens,temperature)
+            GEMINI -> GeminiTranslator(fromLang, toLang,apiKey,modelName,maxOutputTokens,temperature, systemPrompt)
+            OPENROUTER -> OpenRouterTranslator(fromLang, toLang,apiKey,modelName,maxOutputTokens,temperature, systemPrompt)
         }
     }
 

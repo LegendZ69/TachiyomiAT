@@ -9,6 +9,8 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.translation.data.TranslationProvider
+import eu.kanade.translation.logs.LogLevel
+import eu.kanade.translation.logs.TranslationLogManager
 import eu.kanade.translation.model.PageTranslation
 import eu.kanade.translation.model.Translation
 import eu.kanade.translation.model.TranslationBlock
@@ -35,8 +37,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.encodeToStream
 import logcat.LogPriority
 import mihon.core.archive.archiveReader
 import tachiyomi.core.common.util.lang.launchIO
@@ -66,6 +68,8 @@ class ChapterTranslator(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var translationJob: Job? = null
+    
+    private val logManager = Injekt.get<TranslationLogManager>()
 
     val isRunning: Boolean
         get() = translationJob?.isActive == true
@@ -73,16 +77,10 @@ class ChapterTranslator(
     @Volatile
     var isPaused: Boolean = false
 
-    private var textRecognizer: TextRecognizer
-    private var textTranslator: TextTranslator
+    private var textRecognizer: TextRecognizer? = null
+    private var textTranslator: TextTranslator? = null
 
-    init {
-        val fromLang = TextRecognizerLanguage.fromPref(translationPreferences.translateFromLanguage())
-        val toLang = TextTranslatorLanguage.fromPref(translationPreferences.translateToLanguage())
-        textRecognizer = TextRecognizer(fromLang)
-        textTranslator = TextTranslators.fromPref(translationPreferences.translationEngine())
-            .build(translationPreferences, fromLang, toLang)
-    }
+    private val json = Json { prettyPrint = true }
 
     fun start(): Boolean {
         if (isRunning || queueState.value.isEmpty()) {
@@ -156,8 +154,10 @@ class ChapterTranslator(
 
     private fun CoroutineScope.launchTranslationJob(translation: Translation) = launchIO {
         try {
+            logManager.log(LogLevel.INFO, "ChapterTranslator", "Starting translation for chapter: ${translation.chapter.name} (${translation.manga.title})")
             translateChapter(translation)
             if (translation.status == Translation.State.TRANSLATED) {
+                logManager.log(LogLevel.INFO, "ChapterTranslator", "Translation completed for chapter: ${translation.chapter.name} (${translation.manga.title})")
                 removeFromQueue(translation)
             }
             if (areAllTranslationsFinished()) {
@@ -165,6 +165,7 @@ class ChapterTranslator(
             }
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
+            logManager.log(LogLevel.ERROR, "ChapterTranslator", "Translation failed for chapter: ${translation.chapter.name} (${translation.manga.title})", e)
             logcat(LogPriority.ERROR, e)
             stop()
         }
@@ -192,19 +193,22 @@ class ChapterTranslator(
 
     private suspend fun translateChapter(translation: Translation) {
         try {
-            // Check if recognizer reinitialization is needed
-            if (translation.fromLang != textRecognizer.language) {
-                textRecognizer.close()
+            // Lazy initialization and re-initialization if language changes
+            if (textRecognizer == null || textRecognizer?.language != translation.fromLang) {
+                textRecognizer?.close()
                 textRecognizer = TextRecognizer(translation.fromLang)
             }
-            // Check if translator reinitialization is needed
-            if (translation.fromLang != textTranslator.fromLang || translation.toLang != textTranslator.toLang) {
-                withContext(Dispatchers.IO) {
-                    textTranslator.close()
-                }
+
+             if (textTranslator == null || textTranslator?.fromLang != translation.fromLang || textTranslator?.toLang != translation.toLang) {
+                textTranslator?.close()
                 textTranslator = TextTranslators.fromPref(translationPreferences.translationEngine())
                     .build(translationPreferences, translation.fromLang, translation.toLang)
             }
+
+            val recognizer = textRecognizer!!
+            val translator = textTranslator!!
+
+
             // Directory where translations for a manga is stored
             val translationMangaDir = provider.getMangaDir(translation.manga.title, translation.source)
 
@@ -217,45 +221,71 @@ class ChapterTranslator(
                 translation.chapter.scanlator,
                 translation.manga.title,
                 translation.source,
-            )!!
+            )
+
+            if (chapterPath == null) {
+                throw Exception("Chapter images not found")
+            }
 
             val pages = mutableMapOf<String, PageTranslation>()
-            val tmpFile = translationMangaDir.createFile("tmp")!!
             val streams = getChapterPages(chapterPath)
-            /**
-             * saving the stream to tmp file cuz i can't get the
-             * BitmapFactory.decodeStream() to work with the stream from .cbz archive
-             */
+            
+            val tmpFile = translationMangaDir.createFile("tmp_processing_image") ?: throw Exception("Could not create temp file")
+
             withContext(Dispatchers.IO) {
                 for ((fileName, streamFn) in streams) {
                     coroutineContext.ensureActive()
-                    streamFn().use { tmpFile.openOutputStream().use { out -> it.copyTo(out) } }
+                    
+                    streamFn().use { input ->
+                        tmpFile.openOutputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+
                     val image = InputImage.fromFilePath(context, tmpFile.uri)
-                    val result = textRecognizer.recognize(image)
+                    val result = recognizer.recognize(image)
                     val blocks = result.textBlocks.filter { it.boundingBox != null && it.text.length > 1 }
                     val pageTranslation = convertToPageTranslation(blocks, image.width, image.height)
-                    if (pageTranslation.blocks.isNotEmpty()) pages[fileName] = pageTranslation
+                    if (pageTranslation.blocks.isNotEmpty()) {
+                        pages[fileName] = pageTranslation
+                    }
                 }
             }
+            
             tmpFile.delete()
+
             withContext(Dispatchers.IO) {
                 // Translate the text in blocks , this mutates the original blocks
-                textTranslator.translate(pages)
+                logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Starting text translation for ${pages.size} pages")
+                translator.translate(pages)
+                logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Text translation completed")
             }
+            
             // Serialize the Map and save to translations json file
-            Json.encodeToStream(pages, translationMangaDir.createFile(saveFile)!!.openOutputStream())
+            val jsonString = json.encodeToString(pages)
+            val outputFile = translationMangaDir.createFile(saveFile) ?: throw Exception("Could not create output file")
+            outputFile.openOutputStream().use { it.write(jsonString.toByteArray()) }
+
             translation.status = Translation.State.TRANSLATED
         } catch (error: Throwable) {
             translation.status = Translation.State.ERROR
             logcat(LogPriority.ERROR, error)
+            throw error
         }
     }
 
     private fun convertToPageTranslation(blocks: List<Text.TextBlock>, width: Int, height: Int): PageTranslation {
         val translation = PageTranslation(imgWidth = width.toFloat(), imgHeight = height.toFloat())
         for (block in blocks) {
-            val bounds = block.boundingBox!!
-            val symBounds = block.lines.first().elements.first().symbols.first().boundingBox!!
+            val bounds = block.boundingBox ?: continue
+            val lines = block.lines
+            if (lines.isEmpty()) continue
+            val firstLine = lines.first()
+            val elements = firstLine.elements
+            if (elements.isEmpty()) continue
+            val firstSymbol = elements.first().symbols.firstOrNull() ?: continue
+            val symBounds = firstSymbol.boundingBox ?: continue
+
             translation.blocks.add(
                 TranslationBlock(
                     text = block.text,
@@ -263,7 +293,7 @@ class ChapterTranslator(
                     height = bounds.height().toFloat(),
                     symWidth = symBounds.width().toFloat(),
                     symHeight = symBounds.height().toFloat(),
-                    angle = block.lines.first().angle,
+                    angle = firstLine.angle,
                     x = bounds.left.toFloat(),
                     y = bounds.top.toFloat(),
                 ),
@@ -317,12 +347,15 @@ class ChapterTranslator(
         val newWidth = kotlin.math.max(a.x + a.width, b.x + b.width) - newX
         val newHeight = kotlin.math.max(a.y + a.height, b.y + b.height) - newY
         return TranslationBlock(
-            a.text + " " + b.text,
-            a.translation + " " + b.translation,
-            newWidth,
-            newHeight,
-            newX, newY, a.symHeight,
-            a.symWidth, a.angle,
+            text = a.text + " " + b.text,
+            translation = if (a.translation.isNotEmpty() && b.translation.isNotEmpty()) a.translation + " " + b.translation else "",
+            width = newWidth,
+            height = newHeight,
+            x = newX,
+            y = newY,
+            symHeight = a.symHeight,
+            symWidth = a.symWidth,
+            angle = a.angle,
         )
     }
 

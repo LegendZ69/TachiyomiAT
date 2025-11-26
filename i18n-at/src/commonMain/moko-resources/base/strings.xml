@@ -19,4 +19,16 @@
     <string name="pref_engine_model">LLM Model</string>
     <string name="pref_engine_temperature">LLM Temperature</string>
     <string name="pref_engine_max_output">LLM Max Output Token Count</string>
+    <string name="pref_engine_system_prompt">LLM System Prompt</string>
+    <string name="pref_group_logs">Logs</string>
+    <string name="pref_view_logs">View Logs</string>
+    <string name="pref_logs_screen_title">Translation Logs</string>
+    <string name="action_clear_logs">Clear Logs</string>
+    <string name="action_copy_logs">Copy Logs</string>
+    <string name="logs_copied_to_clipboard">Logs copied to clipboard</string>
+    <string name="logs_cleared">Logs cleared</string>
+    <string name="log_level_info">INFO</string>
+    <string name="log_level_error">ERROR</string>
+    <string name="log_level_debug">DEBUG</string>
+    <string name="log_level_warn">WARN</string>
 </resources>

@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.AndroidSourceManager
 import eu.kanade.translation.TranslationManager
 import eu.kanade.translation.data.TranslationProvider
+import eu.kanade.translation.logs.TranslationLogManager
 import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
@@ -129,6 +130,7 @@ class AppModule(val app: Application) : InjektModule {
         // TachiyomiAT
         addSingletonFactory { TranslationProvider(app) }
         addSingletonFactory { TranslationManager(app) }
+        addSingleton(TranslationLogManager(app))
 
         addSingletonFactory { TrackerManager() }
         addSingletonFactory { DelayedTrackingStore(app) }

@@ -6,26 +6,35 @@ import com.google.ai.client.generativeai.type.HarmCategory
 import com.google.ai.client.generativeai.type.SafetySetting
 import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.generationConfig
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.common.model.DownloadConditions
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translation
-import com.google.mlkit.nl.translate.TranslatorOptions
+import eu.kanade.translation.logs.LogLevel
+import eu.kanade.translation.logs.TranslationLogManager
 import eu.kanade.translation.model.PageTranslation
 import eu.kanade.translation.recognizer.TextRecognizerLanguage
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import logcat.LogPriority
 import logcat.logcat
-import org.json.JSONObject
-@Suppress
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+
 class GeminiTranslator(
     override val fromLang: TextRecognizerLanguage,
     override val toLang: TextTranslatorLanguage,
-     apiKey: String,
-     modelName: String,
+    apiKey: String,
+    modelName: String,
     val maxOutputToken: Int,
     val temp: Float,
+    val systemPrompt: String,
 ) : TextTranslator {
 
-    private var model: GenerativeModel = GenerativeModel(
+    private val json = Json { ignoreUnknownKeys = true }
+    private val logManager = Injekt.get<TranslationLogManager>()
+
+    private val model: GenerativeModel = GenerativeModel(
         modelName = modelName,
         apiKey = apiKey,
         generationConfig = generationConfig {
@@ -42,70 +51,50 @@ class GeminiTranslator(
             SafetySetting(HarmCategory.DANGEROUS_CONTENT, BlockThreshold.NONE),
         ),
         systemInstruction = content {
-            text(
-                "## System Prompt for Manhwa/Manga/Manhua Translation\n" +
-                    "\n" +
-                    "You are a highly skilled AI tasked with translating text from scanned images of comics (manhwa, manga, manhua) while preserving the original structure and removing any watermarks or site links. \n" +
-                    "\n" +
-                    "**Here's how you should operate:**\n" +
-                    "\n" +
-                    "1. **Input:** You'll receive a JSON object where keys are image filenames (e.g., \"001.jpg\") and values are lists of text strings extracted from those images.\n" +
-                    "\n" +
-                    "2. **Translation:** Translate all text strings to the target language `${toLang.label}`. Ensure the translation is natural and fluent, adapting idioms and expressions to fit the target language's cultural context.\n" +
-                    "\n" +
-                    "3. **Watermark/Site Link Removal:** Replace any watermarks or site links (e.g., \"colamanga.com\") with the placeholder \"RTMTH\".\n" +
-                    "\n" +
-                    "4. **Structure Preservation:** Maintain the exact same structure as the input JSON. The output JSON should have the same number of keys (image filenames) and the same number of text strings within each list.\n" +
-                    "\n" +
-                    "**Example:**\n" +
-                    "\n" +
-                    "**Input:**\n" +
-                    "\n" +
-                    "```json\n" +
-                    "{\"001.jpg\":[\"chinese1\",\"chinese2\"],\"002.jpg\":[\"chinese2\",\"colamanga.com\"]}\n" +
-                    "```\n" +
-                    "\n" +
-                    "**Output (for `${toLang.label}` = English):**\n" +
-                    "\n" +
-                    "```json\n" +
-                    "{\"001.jpg\":[\"eng1\",\"eng2\"],\"002.jpg\":[\"eng2\",\"RTMTH\"]}\n" +
-                    "```\n" +
-                    "\n" +
-                    "**Key Points:**\n" +
-                    "\n" +
-                    "* Prioritize accurate and natural-sounding translations.\n" +
-                    "* Be meticulous in removing all watermarks and site links.\n" +
-                    "* Ensure the output JSON structure perfectly mirrors the input structure.\n" +
-                    "Return {[key:string]:Array<String>}",
-
-                )
+            text(systemPrompt.replace("\$TARGET_LANGUAGE", toLang.label))
         },
     )
 
     override suspend fun translate(pages: MutableMap<String, PageTranslation>) {
+        if (pages.isEmpty()) return
+
         try {
-            val data = pages.mapValues { (k, v) -> v.blocks.map { b -> b.text } }
-            val json = JSONObject(data)
-            val response = model.generateContent(json.toString())
-            val resJson = JSONObject("${response.text}")
-            for ((k, v) in pages) {
-                v.blocks.forEachIndexed { i, b ->
-                    run {
-                        val res = resJson.optJSONArray(k)?.optString(i, "NULL")
-                        b.translation = if (res == null || res == "NULL") b.text else res
+            val data = pages.mapValues { (_, v) -> v.blocks.map { b -> b.text } }
+            val jsonString = json.encodeToString(data)
+            
+            logManager.log(LogLevel.INFO, "GeminiTranslator", "Sending request to Gemini model: $modelName")
+            logManager.log(LogLevel.DEBUG, "GeminiTranslator", "Input JSON: $jsonString")
+
+            val response = model.generateContent(jsonString)
+            val responseText = response.text ?: "{}"
+            
+            logManager.log(LogLevel.DEBUG, "GeminiTranslator", "Response JSON: $responseText")
+
+            val resJson = try {
+                json.parseToJsonElement(responseText) as? JsonObject
+            } catch (e: Exception) {
+                logManager.log(LogLevel.ERROR, "GeminiTranslator", "Failed to parse Gemini response: $responseText", e)
+                logcat(LogPriority.ERROR) { "Failed to parse Gemini response: $responseText" }
+                throw e
+            }
+
+            if (resJson != null) {
+                for ((k, v) in pages) {
+                    val translationsArray = resJson[k]?.jsonArray
+                    v.blocks.forEachIndexed { i, b ->
+                        val res = translationsArray?.getOrNull(i)?.jsonPrimitive?.contentOrNull
+                        b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
                     }
+                    v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
                 }
-                v.blocks =
-                    v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
             }
         } catch (e: Exception) {
-            logcat { "Image Translation Error : ${e.stackTraceToString()}" }
+            logManager.log(LogLevel.ERROR, "GeminiTranslator", "Gemini Translation Error", e)
+            logcat(LogPriority.ERROR) { "Gemini Translation Error: ${e.stackTraceToString()}" }
             throw e
         }
     }
 
     override fun close() {
     }
-
-
 }

@@ -22,7 +22,7 @@ class TextRecognizer(val language: TextRecognizerLanguage) : Closeable {
     )
 
     fun recognize(image: InputImage): Text {
-        return Tasks.await<Text>(recognizer.process(image))
+        return Tasks.await(recognizer.process(image))
     }
 
     override fun close() {
