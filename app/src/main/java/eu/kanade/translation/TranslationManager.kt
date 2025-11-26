@@ -113,9 +113,13 @@ class TranslationManager(
     fun getChapterTranslation(
         file: UniFile,
     ): Map<String, PageTranslation> {
+        if (!file.exists()) return emptyMap()
         try {
-            return json.decodeFromStream<Map<String, PageTranslation>>(file.openInputStream())
+            return file.openInputStream().use { stream ->
+                json.decodeFromStream<Map<String, PageTranslation>>(stream)
+            }
         } catch (e: Exception) {
+            // Corrupted file, delete it
             file.delete()
         }
         return emptyMap()

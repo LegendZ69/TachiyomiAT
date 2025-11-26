@@ -12,6 +12,7 @@ import eu.kanade.translation.data.TranslationProvider
 import eu.kanade.translation.logs.LogLevel
 import eu.kanade.translation.logs.TranslationLogManager
 import eu.kanade.translation.model.PageTranslation
+import eu.kanade.translation.model.PageTranslationHelper
 import eu.kanade.translation.model.Translation
 import eu.kanade.translation.model.TranslationBlock
 import eu.kanade.translation.recognizer.TextRecognizer
@@ -52,7 +53,7 @@ import tachiyomi.i18n.at.ATMR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.InputStream
-import kotlin.math.abs
+import java.util.concurrent.ConcurrentHashMap
 
 class ChapterTranslator(
     private val context: Context,
@@ -134,7 +135,7 @@ class ChapterTranslator(
                 }
             }.distinctUntilChanged()
             supervisorScope {
-                val translationJobs = mutableMapOf<Translation, Job>()
+                val translationJobs = ConcurrentHashMap<Translation, Job>()
 
                 activeTranslationFlow.collectLatest { activeTranslations ->
                     val translationJobsToStop = translationJobs.filter { it.key !in activeTranslations }
@@ -192,6 +193,7 @@ class ChapterTranslator(
     }
 
     private suspend fun translateChapter(translation: Translation) {
+        translation.status = Translation.State.TRANSLATING
         try {
             // Lazy initialization and re-initialization if language changes
             if (textRecognizer == null || textRecognizer?.language != translation.fromLang) {
@@ -230,6 +232,7 @@ class ChapterTranslator(
             val pages = mutableMapOf<String, PageTranslation>()
             val streams = getChapterPages(chapterPath)
             
+            // Create a temp file for image processing
             val tmpFile = translationMangaDir.createFile("tmp_processing_image") ?: throw Exception("Could not create temp file")
 
             withContext(Dispatchers.IO) {
@@ -299,64 +302,11 @@ class ChapterTranslator(
                 ),
             )
         }
-        // Smart merge overlapping text blocks
-        translation.blocks = smartMergeBlocks(translation.blocks, 50, 30, 30)
+        
+        // Use the helper for smart merging
+        translation.blocks = PageTranslationHelper.smartMergeBlocks(translation.blocks)
 
         return translation
-    }
-
-    private fun smartMergeBlocks(
-        blocks: List<TranslationBlock>,
-        widthThreshold: Int,
-        xThreshold: Int,
-        yThreshold: Int,
-    ): MutableList<TranslationBlock> {
-        if (blocks.isEmpty()) return mutableListOf()
-
-        val merged = mutableListOf<TranslationBlock>()
-        var current = blocks[0]
-        for (i in 1 until blocks.size) {
-            val next = blocks[i]
-            if (shouldMergeTextBlock(current, next, widthThreshold, xThreshold, yThreshold)) {
-                current = mergeTextBlock(current, next)
-            } else {
-                merged.add(current)
-                current = next
-            }
-        }
-        merged.add(current)
-        return merged
-    }
-
-    private fun shouldMergeTextBlock(
-        a: TranslationBlock,
-        b: TranslationBlock,
-        widthThreshold: Int,
-        xThreshold: Int,
-        yThreshold: Int,
-    ): Boolean {
-        val isWidthSimilar = (b.width < a.width) || (abs(a.width - b.width) < widthThreshold)
-        val isXClose = abs(a.x - b.x) < xThreshold
-        val isYClose = (b.y - (a.y + a.height)) < yThreshold
-        return isWidthSimilar && isXClose && isYClose
-    }
-
-    private fun mergeTextBlock(a: TranslationBlock, b: TranslationBlock): TranslationBlock {
-        val newX = kotlin.math.min(a.x, b.x)
-        val newY = a.y
-        val newWidth = kotlin.math.max(a.x + a.width, b.x + b.width) - newX
-        val newHeight = kotlin.math.max(a.y + a.height, b.y + b.height) - newY
-        return TranslationBlock(
-            text = a.text + " " + b.text,
-            translation = if (a.translation.isNotEmpty() && b.translation.isNotEmpty()) a.translation + " " + b.translation else "",
-            width = newWidth,
-            height = newHeight,
-            x = newX,
-            y = newY,
-            symHeight = a.symHeight,
-            symWidth = a.symWidth,
-            angle = a.angle,
-        )
     }
 
     private fun getChapterPages(chapterPath: UniFile): List<Pair<String, () -> InputStream>> {

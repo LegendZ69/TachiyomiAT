@@ -78,6 +78,8 @@ class OpenRouterTranslator(
                 .url("https://openrouter.ai/api/v1/chat/completions")
                 .header("Authorization", "Bearer $apiKey")
                 .header("Content-Type", "application/json")
+                .header("HTTP-Referer", "https://mihon.app") // Recommended by OpenRouter
+                .header("X-Title", "Mihon") // Recommended by OpenRouter
                 .post(body)
                 .build()
 
@@ -95,19 +97,37 @@ class OpenRouterTranslator(
                 } catch (e: Exception) {
                     logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Failed to parse OpenRouter response content: $contentString", e)
                     logcat(LogPriority.ERROR) { "Failed to parse OpenRouter response content: $contentString" }
-                    throw e
+                     // Try to clean markdown code blocks
+                     val cleanContent = contentString.trim().removePrefix("```json").removeSuffix("```").trim()
+                     try {
+                         json.parseToJsonElement(cleanContent).jsonObject
+                     } catch (e2: Exception) {
+                         throw e
+                     }
                 }
 
-                for ((k, v) in pages) {
-                    val translationsArray = resJson[k]?.jsonArray
-                    v.blocks.forEachIndexed { i, b ->
-                        val res = translationsArray?.getOrNull(i)?.jsonPrimitive?.contentOrNull
-                        b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
+                if (resJson != null) {
+                    for ((k, v) in pages) {
+                        val translationsArray = resJson[k]?.jsonArray
+                        if (translationsArray != null) {
+                            v.blocks.forEachIndexed { i, b ->
+                                val res = translationsArray.getOrNull(i)?.jsonPrimitive?.contentOrNull
+                                b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
+                            }
+                             v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
+                        } else {
+                             logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Missing translations for page: $k")
+                        }
                     }
-                    v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
                 }
             } else {
                  logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Content string is null in response")
+                 // Check if there is an error in the response
+                 if (responseJson.containsKey("error")) {
+                      val error = responseJson["error"]?.jsonObject
+                      val message = error?.get("message")?.jsonPrimitive?.contentOrNull
+                      logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "API Error: $message")
+                 }
             }
         } catch (e: Exception) {
             logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "OpenRouter Translation Error", e)

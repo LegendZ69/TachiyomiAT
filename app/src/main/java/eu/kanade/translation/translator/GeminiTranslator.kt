@@ -75,17 +75,28 @@ class GeminiTranslator(
             } catch (e: Exception) {
                 logManager.log(LogLevel.ERROR, "GeminiTranslator", "Failed to parse Gemini response: $responseText", e)
                 logcat(LogPriority.ERROR) { "Failed to parse Gemini response: $responseText" }
-                throw e
+                // Try a cleaner approach to extract JSON if it's wrapped in markdown code blocks
+                val cleanResponse = responseText.trim().removePrefix("```json").removeSuffix("```").trim()
+                 try {
+                    json.parseToJsonElement(cleanResponse) as? JsonObject
+                } catch (e2: Exception) {
+                    throw e
+                }
             }
 
             if (resJson != null) {
                 for ((k, v) in pages) {
                     val translationsArray = resJson[k]?.jsonArray
-                    v.blocks.forEachIndexed { i, b ->
-                        val res = translationsArray?.getOrNull(i)?.jsonPrimitive?.contentOrNull
-                        b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
+                    if (translationsArray != null) {
+                         v.blocks.forEachIndexed { i, b ->
+                            val res = translationsArray.getOrNull(i)?.jsonPrimitive?.contentOrNull
+                            b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
+                        }
+                        // Filter out RTMTH or other markers if necessary, though ideally the prompt should handle this.
+                         v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
+                    } else {
+                        logManager.log(LogLevel.WARN, "GeminiTranslator", "Missing translations for page: $k")
                     }
-                    v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
                 }
             }
         } catch (e: Exception) {

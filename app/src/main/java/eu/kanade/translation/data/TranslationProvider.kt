@@ -29,8 +29,10 @@ class TranslationProvider(
      * @param source the source of the manga.
      */
     internal fun getMangaDir(mangaTitle: String, source: Source): UniFile {
+        val tDir = translationDir ?: throw Exception("Translation directory unavailable")
+
         try {
-            return translationDir!!
+            return tDir
                 .createDirectory(getSourceDirName(source))!!
                 .createDirectory(getMangaDirName(mangaTitle))!!
         } catch (e: Throwable) {
@@ -38,7 +40,7 @@ class TranslationProvider(
             throw Exception(
                 context.stringResource(
                     MR.strings.invalid_location,
-                    translationDir?.displayablePath ?: "",
+                    tDir.displayablePath,
                 ),
             )
         }
