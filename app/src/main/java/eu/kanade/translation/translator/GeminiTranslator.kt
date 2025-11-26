@@ -25,7 +25,7 @@ class GeminiTranslator(
     override val fromLang: TextRecognizerLanguage,
     override val toLang: TextTranslatorLanguage,
     apiKey: String,
-    modelName: String,
+    private val modelName: String,
     val maxOutputToken: Int,
     val temp: Float,
     val systemPrompt: String,
@@ -62,8 +62,6 @@ class GeminiTranslator(
             val data = pages.mapValues { (_, v) -> v.blocks.map { b -> b.text } }
             val jsonString = json.encodeToString(data)
             
-            // Accessing modelName property of GenerativeModel is not directly available or might be private/internal depending on version.
-            // Using the class property 'modelName' passed in constructor instead.
             logManager.log(LogLevel.INFO, "GeminiTranslator", "Sending request to Gemini model: $modelName")
             logManager.log(LogLevel.DEBUG, "GeminiTranslator", "Input JSON: $jsonString")
 
