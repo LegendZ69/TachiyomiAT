@@ -1,124 +1,177 @@
-package eu.kanade.translation.logs
+package eu.kanade.translation
 
 import android.content.Context
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.datetime.Clock
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
-import tachiyomi.core.common.util.system.logcat
+import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.source.Source
+import eu.kanade.translation.data.TranslationProvider
+import eu.kanade.translation.model.PageTranslation
+import eu.kanade.translation.model.Translation
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onStart
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
+import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.translation.TranslationPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.io.File
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
-data class TranslationLogEntry(
-    val timestamp: String,
-    val level: LogLevel,
-    val tag: String,
-    val message: String,
-    val exception: String? = null
-)
+class TranslationManager(
+    private val context: Context,
+    private val provider: TranslationProvider = Injekt.get(),
+    private val sourceManager: SourceManager = Injekt.get(),
+    private val translationPreferences: TranslationPreferences = Injekt.get(),
+) {
+    private val translator = ChapterTranslator(context, provider)
 
-enum class LogLevel {
-    DEBUG, INFO, WARN, ERROR
-}
+    val isRunning: Boolean
+        get() = translator.isRunning
 
-class TranslationLogManager(private val context: Context) {
-    
-    private val _logs = MutableStateFlow<List<TranslationLogEntry>>(emptyList())
-    val logs = _logs.asStateFlow()
-    
-    private val logFile: File by lazy {
-        File(context.filesDir, "translation_logs.txt")
-    }
-    
-    init {
-        loadLogs()
-    }
-
-    private fun loadLogs() {
-        if (logFile.exists()) {
-            try {
-                val entries = logFile.readLines().mapNotNull { parseLogLine(it) }
-                _logs.value = entries.reversed() // Show newest first
-            } catch (e: Exception) {
-                logcat { "Failed to load logs: ${e.message}" }
-            }
-        }
-    }
-
-    private fun parseLogLine(line: String): TranslationLogEntry? {
-        // Simple parser, adjust based on how you write logs
-        // Format: [TIMESTAMP] [LEVEL] [TAG]: Message | Exception
-        return try {
-            val parts = line.split(" | ", limit = 2)
-            val metaAndMsg = parts[0]
-            val exception = parts.getOrNull(1)
-            
-            val timestampEnd = metaAndMsg.indexOf(']')
-            val levelEnd = metaAndMsg.indexOf(']', timestampEnd + 1)
-            val tagEnd = metaAndMsg.indexOf(':', levelEnd + 1)
-            
-            if (timestampEnd == -1 || levelEnd == -1 || tagEnd == -1) return null
-
-            val timestamp = metaAndMsg.substring(1, timestampEnd)
-            val levelStr = metaAndMsg.substring(timestampEnd + 3, levelEnd)
-            val tag = metaAndMsg.substring(levelEnd + 3, tagEnd)
-            val message = metaAndMsg.substring(tagEnd + 2)
-            
-            TranslationLogEntry(
-                timestamp = timestamp,
-                level = LogLevel.valueOf(levelStr),
-                tag = tag,
-                message = message,
-                exception = exception
-            )
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    fun log(level: LogLevel, tag: String, message: String, throwable: Throwable? = null) {
-        val currentMoment = Clock.System.now()
-        val datetime = currentMoment.toLocalDateTime(TimeZone.currentSystemDefault())
-        val timestamp = "${datetime.date} ${datetime.time.toString().take(8)}"
+    val queueState
+        get() = translator.queueState
         
-        val entry = TranslationLogEntry(
-            timestamp = timestamp,
-            level = level,
-            tag = tag,
-            message = message,
-            exception = throwable?.stackTraceToString()
-        )
-        
-        _logs.update { listOf(entry) + it }
-        
-        // Write to file
-        appendLogToFile(entry)
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun translatorStart() = translator.start()
+    fun translatorStop(reason: String? = null) = translator.stop(reason)
+
+    fun startTranslation() {
+        if (translator.isRunning) return
+        translator.start()
     }
 
-    private fun appendLogToFile(entry: TranslationLogEntry) {
+    fun pauseTranslation() {
+        translator.pause()
+        translator.stop()
+    }
+
+    fun clearQueue() {
+        translator.clearQueue()
+        translator.stop()
+    }
+
+    fun getQueuedTranslationOrNull(chapterId: Long): Translation? {
+        return queueState.value.find { it.chapter.id == chapterId }
+    }
+
+    fun translateChapter(manga: Manga, chapters: Chapter) {
+        translator.queueChapter(manga, chapters)
+        startTranslation()
+    }
+
+    fun getChapterTranslationStatus(
+        chapterId: Long,
+        chapterName: String,
+        scanlator: String?,
+        title: String,
+        sourceId: Long,
+    ): Translation.State {
+        val translation = getQueuedTranslationOrNull(chapterId)
+        if (translation != null) return translation.status
+        if (isChapterTranslated(chapterName, scanlator, title, sourceId)) return Translation.State.TRANSLATED
+        return Translation.State.NOT_TRANSLATED
+    }
+
+    fun isChapterTranslated(
+        chapterName: String,
+        chapterScanlator: String?,
+        mangaTitle: String,
+        sourceId: Long,
+    ): Boolean {
+        val source = sourceManager.get(sourceId)
+        if (source == null) return false
+        val file = provider.findTranslationFile(chapterName, chapterScanlator, mangaTitle, source)
+        return file?.exists() == true
+    }
+    fun getChapterTranslation(
+        chapterName: String,
+        scanlator: String?,
+        title: String,
+        source: Source,
+    ): Map<String, PageTranslation> {
         try {
-            val logLine = buildString {
-                append("[${entry.timestamp}] [${entry.level}] [${entry.tag}]: ${entry.message}")
-                if (entry.exception != null) {
-                    append(" | ${entry.exception}")
-                }
-                append("\n")
-            }
-            logFile.appendText(logLine)
+            val file = provider.findTranslationFile(
+                chapterName,
+                scanlator,
+                title,
+                source,
+            ) ?: return emptyMap()
+            return getChapterTranslation(file)
+        } catch (_: Exception) {
+        }
+        return emptyMap()
+    }
+
+    fun getChapterTranslation(
+        file: UniFile,
+    ): Map<String, PageTranslation> {
+        try {
+            return json.decodeFromStream<Map<String, PageTranslation>>(file.openInputStream())
         } catch (e: Exception) {
-            // Fails silently to avoid infinite recursion if logging fails
+            file.delete()
+        }
+        return emptyMap()
+    }
+
+    fun deleteTranslation(chapter: Chapter, manga: Manga, source: Source) {
+        launchIO {
+            removeFromTranslationQueue(chapter)
+            val file = provider.findTranslationFile(chapter.name, chapter.scanlator, manga.title, source)
+            file?.delete()
         }
     }
 
-    fun clearLogs() {
-        _logs.value = emptyList()
-        if (logFile.exists()) {
-            logFile.delete()
+    fun deleteManga(manga: Manga, source: Source, removeQueued: Boolean = true) {
+        launchIO {
+            if (removeQueued) {
+                translator.removeFromQueue(manga)
+            }
+            provider.findMangaDir(manga.title, source)?.delete()
+            val sourceDir = provider.findSourceDir(source)
+            if (sourceDir?.listFiles()?.isEmpty() == true) {
+                sourceDir.delete()
+            }
         }
     }
+
+    fun cancelQueuedTranslation(translation: Translation) {
+        removeFromTranslationQueue(translation.chapter)
+    }
+
+    private fun removeFromTranslationQueue(chapter: Chapter) {
+        val wasRunning = translator.isRunning
+        if (wasRunning) {
+            translator.pause()
+        }
+        translator.removeFromQueue(chapter)
+        if (wasRunning) {
+            if (queueState.value.isEmpty()) {
+                translator.stop()
+            } else if (queueState.value.isNotEmpty()) {
+                translator.start()
+            }
+        }
+    }
+
+    fun statusFlow(): Flow<Translation> = queueState
+        .flatMapLatest { translations ->
+            translations
+                .map { translation ->
+                    translation.statusFlow.drop(1).map { translation }
+                }
+                .merge()
+        }
+        .onStart {
+            emitAll(
+                queueState.value.filter { translation -> translation.status == Translation.State.TRANSLATING }.asFlow(),
+            )
+        }
 }
