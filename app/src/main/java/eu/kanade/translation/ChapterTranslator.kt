@@ -144,7 +144,9 @@ class ChapterTranslator(
                         translationJobs.remove(download)
                     }
 
-                    val translationsToStart = activeTranslations.filter { it !in translationJobs }
+                    // ConcurrentHashMap.contains(Object) checks for value presence in Java, not key.
+                    // We must use containsKey explicitly when working with ConcurrentHashMap in this context if 'in' operator is ambiguous or maps to contains().
+                    val translationsToStart = activeTranslations.filter { !translationJobs.containsKey(it) }
                     translationsToStart.forEach { translation ->
                         translationJobs[translation] = launchTranslationJob(translation)
                     }

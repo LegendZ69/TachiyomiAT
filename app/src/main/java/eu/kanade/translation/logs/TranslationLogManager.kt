@@ -4,15 +4,13 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.datetime.Clock
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class TranslationLogEntry(
     val timestamp: String,
@@ -34,6 +32,8 @@ class TranslationLogManager(private val context: Context) {
     private val logFile: File by lazy {
         File(context.filesDir, "translation_logs.txt")
     }
+    
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     
     init {
         loadLogs()
@@ -82,9 +82,7 @@ class TranslationLogManager(private val context: Context) {
     }
 
     fun log(level: LogLevel, tag: String, message: String, throwable: Throwable? = null) {
-        val currentMoment = Clock.System.now()
-        val datetime = currentMoment.toLocalDateTime(TimeZone.currentSystemDefault())
-        val timestamp = "${datetime.date} ${datetime.time.toString().take(8)}"
+        val timestamp = dateFormat.format(Date())
         
         val entry = TranslationLogEntry(
             timestamp = timestamp,
