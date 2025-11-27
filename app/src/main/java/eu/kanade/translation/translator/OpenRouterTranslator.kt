@@ -5,9 +5,9 @@ import eu.kanade.translation.logs.LogLevel
 import eu.kanade.translation.logs.TranslationLogManager
 import eu.kanade.translation.model.PageTranslation
 import eu.kanade.translation.recognizer.TextRecognizerLanguage
+import eu.kanade.translation.util.TranslationUtils
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -93,26 +93,23 @@ class OpenRouterTranslator(
             
             if (contentString != null) {
                 val resJson = try {
-                    val cleanJson = extractJson(contentString)
-                    json.parseToJsonElement(cleanJson).jsonObject
+                    TranslationUtils.extractAndParseJson(contentString)
                 } catch (e: Exception) {
                     logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Failed to parse OpenRouter response content: $contentString", e)
                     logcat(LogPriority.ERROR) { "Failed to parse OpenRouter response content: $contentString" }
                     throw e
                 }
 
-                if (resJson != null) {
-                    for ((k, v) in pages) {
-                        val translationsArray = resJson[k]?.jsonArray
-                        if (translationsArray != null) {
-                            v.blocks.forEachIndexed { i, b ->
-                                val res = translationsArray.getOrNull(i)?.jsonPrimitive?.contentOrNull
-                                b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
-                            }
-                             v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
-                        } else {
-                             logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Missing translations for page: $k")
+                for ((k, v) in pages) {
+                    val translationsArray = resJson[k]?.jsonArray
+                    if (translationsArray != null) {
+                        v.blocks.forEachIndexed { i, b ->
+                            val res = translationsArray.getOrNull(i)?.jsonPrimitive?.contentOrNull
+                            b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
                         }
+                         v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
+                    } else {
+                         logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Missing translations for page: $k")
                     }
                 }
             } else {
@@ -128,20 +125,6 @@ class OpenRouterTranslator(
             logcat(LogPriority.ERROR) { "OpenRouter Translation Error: ${e.stackTraceToString()}" }
             throw e
         }
-    }
-
-    private fun extractJson(text: String): String {
-        val jsonPattern = Regex("```json(.*?)```", RegexOption.DOT_MATCHES_ALL)
-        val match = jsonPattern.find(text)
-        if (match != null) {
-            return match.groupValues[1].trim()
-        }
-        val start = text.indexOf('{')
-        val end = text.lastIndexOf('}')
-        if (start != -1 && end != -1 && start < end) {
-            return text.substring(start, end + 1)
-        }
-        return text.trim()
     }
 
     override fun close() {

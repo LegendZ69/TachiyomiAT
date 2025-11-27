@@ -196,6 +196,8 @@ class ChapterTranslator(
     private suspend fun translateChapter(translation: Translation) {
         translation.status = Translation.State.TRANSLATING
         try {
+            // Re-init engines if needed, synchronized to avoid race conditions if multiple jobs start (though ChapterTranslator is singleton per Manager)
+            // But let's keep it simple for now as this is called sequentially per worker usually
             if (textRecognizer == null || textRecognizer?.language != translation.fromLang) {
                 textRecognizer?.close()
                 textRecognizer = TextRecognizer(translation.fromLang)
@@ -218,7 +220,7 @@ class ChapterTranslator(
                 translation.chapter.scanlator,
                 translation.manga.title,
                 translation.source,
-            ) ?: throw Exception("Chapter images not found")
+            ) ?: throw Exception("Chapter images not found. Please download the chapter first.")
 
             val pages = mutableMapOf<String, PageTranslation>()
             val pageDataList = getChapterPages(chapterPath)
@@ -246,7 +248,7 @@ class ChapterTranslator(
 
                         val image = InputImage.fromFilePath(context, imageUri)
                         val result = recognizer.recognize(image)
-                        val blocks = result.textBlocks.filter { it.boundingBox != null && it.text.length > 1 }
+                        val blocks = result.textBlocks.filter { it.boundingBox != null && it.text.trim().length > 1 }
                         val pageTranslation = convertToPageTranslation(blocks, image.width, image.height)
                         if (pageTranslation.blocks.isNotEmpty()) {
                             pages[pageData.name] = pageTranslation
@@ -258,9 +260,13 @@ class ChapterTranslator(
             }
 
             withContext(Dispatchers.IO) {
-                logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Starting text translation for ${pages.size} pages")
-                translator.translate(pages)
-                logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Text translation completed")
+                if (pages.isNotEmpty()) {
+                    logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Starting text translation for ${pages.size} pages")
+                    translator.translate(pages)
+                    logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Text translation completed")
+                } else {
+                    logManager.log(LogLevel.WARN, "ChapterTranslator", "No text detected in chapter images")
+                }
             }
             
             val jsonString = json.encodeToString(pages)
@@ -270,6 +276,7 @@ class ChapterTranslator(
             translation.status = Translation.State.TRANSLATED
         } catch (error: Throwable) {
             translation.status = Translation.State.ERROR
+            logManager.log(LogLevel.ERROR, "ChapterTranslator", "Error translating chapter: ${error.message}", error)
             logcat(LogPriority.ERROR, error)
             throw error
         }
