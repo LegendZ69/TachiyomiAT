@@ -92,7 +92,6 @@ class GeminiTranslator(
                             val res = translationsArray.getOrNull(i)?.jsonPrimitive?.contentOrNull
                             b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
                         }
-                        // Filter out RTMTH or other markers if necessary, though ideally the prompt should handle this.
                          v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
                     } else {
                         logManager.log(LogLevel.WARN, "GeminiTranslator", "Missing translations for page: $k")

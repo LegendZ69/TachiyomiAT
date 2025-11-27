@@ -31,4 +31,12 @@
     <string name="log_level_error">ERROR</string>
     <string name="log_level_debug">DEBUG</string>
     <string name="log_level_warn">WARN</string>
+    
+    <string name="action_fetch_models">Fetch Available Models</string>
+    <string name="pref_fetch_models_subtitle">Update the model list using your API Key</string>
+    <string name="error_api_key_missing">Please enter an API Key first</string>
+    <string name="msg_fetching_models">Fetching models...</string>
+    <string name="msg_models_fetched">Models updated successfully</string>
+    <string name="error_no_models_found">No compatible models found</string>
+    <string name="error_fetching_models">Failed to fetch models</string>
 </resources>

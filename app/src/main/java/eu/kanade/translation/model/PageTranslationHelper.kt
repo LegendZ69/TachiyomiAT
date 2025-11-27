@@ -36,7 +36,7 @@ class PageTranslationHelper {
             }
             merged.add(current)
             
-            // Optional: Run overlap merge after smart merge to catch any remaining heavy overlaps
+            // Run overlap merge after smart merge to catch any remaining heavy overlaps
             return mergeOverlap(merged).toMutableList()
         }
 
@@ -48,7 +48,6 @@ class PageTranslationHelper {
             yThreshold: Int,
         ): Boolean {
             // Check if widths are similar or if one is significantly smaller (e.g. punctuation or short line)
-            // But usually we want to merge lines in a bubble which have similar widths or are centered.
             val isWidthSimilar = (b.width < a.width) || (abs(a.width - b.width) < widthThreshold)
             
             // Check horizontal alignment (X coordinate)
@@ -119,12 +118,11 @@ class PageTranslationHelper {
             return currentBlocks
         }
 
-        // Checks if two block overlap each other and are in same orientation
         private fun shouldMergeOverlap(r1: TranslationBlock, r2: TranslationBlock): Boolean {
              // 1. Angle Check: Are they roughly parallel?
             if (abs(r1.angle - r2.angle) > 10) return false
 
-            // 2. Overlap Check: Do their bounding boxes intersect?
+            // 2. Overlap Check: Do their bounding boxes intersect significantly?
             val intersects = r1.x < (r2.x + r2.width) &&
                 (r1.x + r1.width) > r2.x &&
                 r1.y < (r2.y + r2.height) &&

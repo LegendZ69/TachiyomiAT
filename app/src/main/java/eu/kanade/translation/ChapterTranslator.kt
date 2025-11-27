@@ -1,6 +1,7 @@
 package eu.kanade.translation
 
 import android.content.Context
+import android.net.Uri
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.hippo.unifile.UniFile
@@ -138,14 +139,12 @@ class ChapterTranslator(
                 val translationJobs = ConcurrentHashMap<Translation, Job>()
 
                 activeTranslationFlow.collectLatest { activeTranslations ->
-                    val translationJobsToStop = translationJobs.filter { it.key !in activeTranslations }
+                    val translationJobsToStop = translationJobs.filter { !activeTranslations.contains(it.key) }
                     translationJobsToStop.forEach { (download, job) ->
                         job.cancel()
                         translationJobs.remove(download)
                     }
 
-                    // ConcurrentHashMap.contains(Object) checks for value presence in Java, not key.
-                    // We must use containsKey explicitly when working with ConcurrentHashMap in this context if 'in' operator is ambiguous or maps to contains().
                     val translationsToStart = activeTranslations.filter { !translationJobs.containsKey(it) }
                     translationsToStart.forEach { translation ->
                         translationJobs[translation] = launchTranslationJob(translation)
@@ -197,7 +196,6 @@ class ChapterTranslator(
     private suspend fun translateChapter(translation: Translation) {
         translation.status = Translation.State.TRANSLATING
         try {
-            // Lazy initialization and re-initialization if language changes
             if (textRecognizer == null || textRecognizer?.language != translation.fromLang) {
                 textRecognizer?.close()
                 textRecognizer = TextRecognizer(translation.fromLang)
@@ -212,61 +210,59 @@ class ChapterTranslator(
             val recognizer = textRecognizer!!
             val translator = textTranslator!!
 
-
-            // Directory where translations for a manga is stored
             val translationMangaDir = provider.getMangaDir(translation.manga.title, translation.source)
-
-            // translations save file
             val saveFile = provider.getTranslationFileName(translation.chapter.name, translation.chapter.scanlator)
 
-            // Directory where chapter images is stored
             val chapterPath = downloadProvider.findChapterDir(
                 translation.chapter.name,
                 translation.chapter.scanlator,
                 translation.manga.title,
                 translation.source,
-            )
-
-            if (chapterPath == null) {
-                throw Exception("Chapter images not found")
-            }
+            ) ?: throw Exception("Chapter images not found")
 
             val pages = mutableMapOf<String, PageTranslation>()
-            val streams = getChapterPages(chapterPath)
+            val pageDataList = getChapterPages(chapterPath)
             
-            // Create a temp file for image processing
+            // Create a temp file for image processing if needed
             val tmpFile = translationMangaDir.createFile("tmp_processing_image") ?: throw Exception("Could not create temp file")
 
-            withContext(Dispatchers.IO) {
-                for ((fileName, streamFn) in streams) {
-                    coroutineContext.ensureActive()
-                    
-                    streamFn().use { input ->
-                        tmpFile.openOutputStream().use { output ->
-                            input.copyTo(output)
+            try {
+                withContext(Dispatchers.IO) {
+                    for (pageData in pageDataList) {
+                        coroutineContext.ensureActive()
+                        
+                        // Optimized: If file exists on disk, use it directly. Otherwise extract stream to temp file.
+                        val imageUri = when (pageData) {
+                            is PageData.File -> pageData.uri
+                            is PageData.Stream -> {
+                                pageData.open().use { input ->
+                                    tmpFile.openOutputStream().use { output ->
+                                        input.copyTo(output)
+                                    }
+                                }
+                                tmpFile.uri
+                            }
+                        }
+
+                        val image = InputImage.fromFilePath(context, imageUri)
+                        val result = recognizer.recognize(image)
+                        val blocks = result.textBlocks.filter { it.boundingBox != null && it.text.length > 1 }
+                        val pageTranslation = convertToPageTranslation(blocks, image.width, image.height)
+                        if (pageTranslation.blocks.isNotEmpty()) {
+                            pages[pageData.name] = pageTranslation
                         }
                     }
-
-                    val image = InputImage.fromFilePath(context, tmpFile.uri)
-                    val result = recognizer.recognize(image)
-                    val blocks = result.textBlocks.filter { it.boundingBox != null && it.text.length > 1 }
-                    val pageTranslation = convertToPageTranslation(blocks, image.width, image.height)
-                    if (pageTranslation.blocks.isNotEmpty()) {
-                        pages[fileName] = pageTranslation
-                    }
                 }
+            } finally {
+                tmpFile.delete()
             }
-            
-            tmpFile.delete()
 
             withContext(Dispatchers.IO) {
-                // Translate the text in blocks , this mutates the original blocks
                 logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Starting text translation for ${pages.size} pages")
                 translator.translate(pages)
                 logManager.log(LogLevel.DEBUG, "ChapterTranslator", "Text translation completed")
             }
             
-            // Serialize the Map and save to translations json file
             val jsonString = json.encodeToString(pages)
             val outputFile = translationMangaDir.createFile(saveFile) ?: throw Exception("Could not create output file")
             outputFile.openOutputStream().use { it.write(jsonString.toByteArray()) }
@@ -305,26 +301,33 @@ class ChapterTranslator(
             )
         }
         
-        // Use the helper for smart merging
         translation.blocks = PageTranslationHelper.smartMergeBlocks(translation.blocks)
 
         return translation
     }
 
-    private fun getChapterPages(chapterPath: UniFile): List<Pair<String, () -> InputStream>> {
+    private fun getChapterPages(chapterPath: UniFile): List<PageData> {
         if (chapterPath.isFile) {
             val reader = chapterPath.archiveReader(context)
             return reader.useEntries { entries ->
                 entries.filter { it.isFile && ImageUtil.isImage(it.name) { reader.getInputStream(it.name)!! } }
                     .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }.map { entry ->
-                        Pair(entry.name) { reader.getInputStream(entry.name)!! }
+                        PageData.Stream(entry.name) { reader.getInputStream(entry.name)!! }
                     }.toList()
             }
         } else {
-            return chapterPath.listFiles()!!.filter { ImageUtil.isImage(it.name) }.map { entry ->
-                Pair(entry.name!!) { entry.openInputStream() }
-            }.toList()
+            return chapterPath.listFiles()!!.filter { ImageUtil.isImage(it.name) }
+                .sortedWith { f1, f2 -> f1.name!!.compareToCaseInsensitiveNaturalOrder(f2.name!!) }
+                .map { file ->
+                    PageData.File(file.name!!, file.uri)
+                }.toList()
         }
+    }
+
+    private sealed interface PageData {
+        val name: String
+        data class Stream(override val name: String, val open: () -> InputStream) : PageData
+        data class File(override val name: String, val uri: Uri) : PageData
     }
 
     private fun areAllTranslationsFinished(): Boolean {

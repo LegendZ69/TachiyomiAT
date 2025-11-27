@@ -10,8 +10,8 @@ import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.Closeable
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeoutException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class TextRecognizer(val language: TextRecognizerLanguage) : Closeable {
 
@@ -25,10 +25,9 @@ class TextRecognizer(val language: TextRecognizerLanguage) : Closeable {
     )
 
     fun recognize(image: InputImage): Text {
-        // Adding a timeout can prevent hanging if the recognizer gets stuck, though Tasks.await is blocking.
-        // For production, consider using suspendCancellableCoroutine with Tasks.addOnSuccessListener/addOnFailureListener
         return try {
-            Tasks.await(recognizer.process(image), 30, TimeUnit.SECONDS)
+            // Increased timeout for slower devices or larger images
+            Tasks.await(recognizer.process(image), 45, TimeUnit.SECONDS)
         } catch (e: ExecutionException) {
             throw e.cause ?: e
         } catch (e: TimeoutException) {

@@ -122,7 +122,6 @@ class OpenRouterTranslator(
                 }
             } else {
                  logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Content string is null in response")
-                 // Check if there is an error in the response
                  if (responseJson.containsKey("error")) {
                       val error = responseJson["error"]?.jsonObject
                       val message = error?.get("message")?.jsonPrimitive?.contentOrNull
