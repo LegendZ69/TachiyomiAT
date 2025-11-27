@@ -10,17 +10,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.translation.data.TranslationFont
 import eu.kanade.translation.recognizer.TextRecognizerLanguage
 import eu.kanade.translation.translator.TextTranslatorLanguage
 import eu.kanade.translation.translator.TextTranslators
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import tachiyomi.core.common.util.system.toast
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import tachiyomi.domain.translation.TranslationPreferences
 import tachiyomi.i18n.at.ATMR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -108,10 +115,10 @@ object SettingsTranslationScreen : SearchableSettings {
         
         // This is a temporary simple model listing if dynamic fetching fails or isn't triggered
         val defaultModels = listOf(
-            "gemini-3-pro-preview",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite", 
+            "gemini-2.0-flash", 
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-1.0-pro"
         )
         
         val apiKey = translationPreferences.translationEngineApiKey().get()
@@ -137,14 +144,6 @@ object SettingsTranslationScreen : SearchableSettings {
                             scope.launch {
                                 try {
                                     context.toast(ATMR.strings.msg_fetching_models)
-                                    // Gemini doesn't have a direct "list models" API in the simple GenerativeModel client easily accessible 
-                                    // without the full Google AI SDK or making a raw HTTP request.
-                                    // However, we can simulate or we'd need to implement a manual fetcher.
-                                    // For now, let's allow users to type it in if they want, OR switch back to EditText if listing fails.
-                                    // But to fulfill "allow user to choose from list of available models", we should likely fetch it.
-                                    // Since we don't have a direct fetcher in the codebase, we'll implement a basic one via REST if possible or fallback.
-                                    // For Gemini specifically, it's GET https://generativelanguage.googleapis.com/v1beta/models?key=API_KEY
-                                    
                                     val fetchedModels = fetchGeminiModels(apiKey)
                                     if (fetchedModels.isNotEmpty()) {
                                         models = fetchedModels
@@ -176,14 +175,11 @@ object SettingsTranslationScreen : SearchableSettings {
         )
     }
 
-    // Helper to fetch Gemini models using OkHttp or similar if available, otherwise just use a hardcoded list update
-    // Since we don't have a network client exposed here easily, we'll use a simpler approach or rely on what's available.
-    // Assuming we can use OkHttp since it's in the project.
     private suspend fun fetchGeminiModels(apiKey: String): List<String> {
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             try {
-                val client = okhttp3.OkHttpClient()
-                val request = okhttp3.Request.Builder()
+                val client = OkHttpClient()
+                val request = Request.Builder()
                     .url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
                     .build()
                 
@@ -192,14 +188,12 @@ object SettingsTranslationScreen : SearchableSettings {
                 
                 if (!response.isSuccessful) return@withContext emptyList()
                 
-                // Parse JSON manually or using regex for simplicity to avoid huge dependency usage here if not needed
-                // Structure: { "models": [ { "name": "models/gemini-pro", ... } ] }
-                val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                val json = Json { ignoreUnknownKeys = true }
                 val element = json.parseToJsonElement(body)
-                val modelsArray = element.kotlinx.serialization.json.jsonObject["models"]?.kotlinx.serialization.json.jsonArray
+                val modelsArray = element.jsonObject["models"]?.jsonArray
                 
                 modelsArray?.mapNotNull { 
-                    it.kotlinx.serialization.json.jsonObject["name"]?.kotlinx.serialization.json.jsonPrimitive?.content?.removePrefix("models/")
+                    it.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.removePrefix("models/")
                 }?.filter { it.contains("gemini") } ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
