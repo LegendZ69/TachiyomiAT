@@ -93,17 +93,12 @@ class OpenRouterTranslator(
             
             if (contentString != null) {
                 val resJson = try {
-                    json.parseToJsonElement(contentString).jsonObject
+                    val cleanJson = extractJson(contentString)
+                    json.parseToJsonElement(cleanJson).jsonObject
                 } catch (e: Exception) {
                     logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Failed to parse OpenRouter response content: $contentString", e)
                     logcat(LogPriority.ERROR) { "Failed to parse OpenRouter response content: $contentString" }
-                     // Try to clean markdown code blocks
-                     val cleanContent = contentString.trim().removePrefix("```json").removeSuffix("```").trim()
-                     try {
-                         json.parseToJsonElement(cleanContent).jsonObject
-                     } catch (e2: Exception) {
-                         throw e
-                     }
+                    throw e
                 }
 
                 if (resJson != null) {
@@ -133,6 +128,20 @@ class OpenRouterTranslator(
             logcat(LogPriority.ERROR) { "OpenRouter Translation Error: ${e.stackTraceToString()}" }
             throw e
         }
+    }
+
+    private fun extractJson(text: String): String {
+        val jsonPattern = Regex("```json(.*?)```", RegexOption.DOT_MATCHES_ALL)
+        val match = jsonPattern.find(text)
+        if (match != null) {
+            return match.groupValues[1].trim()
+        }
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start != -1 && end != -1 && start < end) {
+            return text.substring(start, end + 1)
+        }
+        return text.trim()
     }
 
     override fun close() {

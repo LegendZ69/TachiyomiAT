@@ -113,12 +113,12 @@ object SettingsTranslationScreen : SearchableSettings {
         val scope = rememberCoroutineScope()
         var models by remember { mutableStateOf<List<String>?>(null) }
         
-        // This is a temporary simple model listing if dynamic fetching fails or isn't triggered
         val defaultModels = listOf(
             "gemini-2.0-flash", 
+            "gemini-2.0-flash-lite",
+            "gemini-2.0-pro-exp-02-05",
             "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-1.0-pro"
+            "gemini-1.5-pro"
         )
         
         val apiKey = translationPreferences.translationEngineApiKey().get()
@@ -162,6 +162,14 @@ object SettingsTranslationScreen : SearchableSettings {
                 Preference.PreferenceItem.EditTextPreference(
                     pref = translationPreferences.translationEngineTemperature(),
                     title = stringResource(ATMR.strings.pref_engine_temperature),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    pref = translationPreferences.translationEngineTopK(),
+                    title = stringResource(ATMR.strings.pref_engine_top_k),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    pref = translationPreferences.translationEngineTopP(),
+                    title = stringResource(ATMR.strings.pref_engine_top_p),
                 ),
                 Preference.PreferenceItem.EditTextPreference(
                     pref = translationPreferences.translationEngineMaxOutputTokens(),

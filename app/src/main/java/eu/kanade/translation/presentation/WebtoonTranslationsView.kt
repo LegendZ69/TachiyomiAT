@@ -47,10 +47,11 @@ class WebtoonTranslationsView :
     ) : super(context, attrs, defStyleAttr) {
         this.translation = PageTranslation.EMPTY
         this.font = TranslationFont.ANIME_ACE
-        this.fontFamily = Font(
-            resId = font.res,
-            weight = FontWeight.Bold,
-        ).toFontFamily()
+        this.fontFamily = if (font.res != null) {
+            Font(resId = font.res!!, weight = FontWeight.Bold).toFontFamily()
+        } else {
+            FontFamily.Default
+        }
     }
 
     constructor(
@@ -62,10 +63,11 @@ class WebtoonTranslationsView :
     ) : super(context, attrs, defStyleAttr) {
         this.translation = translation
         this.font = font ?: TranslationFont.ANIME_ACE
-        this.fontFamily = Font(
-            resId = this.font.res,
-            weight = FontWeight.Bold,
-        ).toFontFamily()
+        this.fontFamily = if (this.font.res != null) {
+            Font(resId = this.font.res!!, weight = FontWeight.Bold).toFontFamily()
+        } else {
+            FontFamily.Default
+        }
     }
 
     @Composable
@@ -87,10 +89,9 @@ class WebtoonTranslationsView :
             if (size == IntSize.Zero) return
             val scaleFactor = size.width / translation.imgWidth
             
-            // PASS 1: Draw all backgrounds first (Layer 1)
             translation.blocks.forEach { block ->
-                val padX = block.symWidth
-                val padY = block.symHeight * 0.75f
+                val padX = block.symWidth * 0.5f 
+                val padY = block.symHeight * 0.5f
                 
                 val bgX = max((block.x - padX / 2) * scaleFactor, 0f)
                 val bgY = max((block.y - padY / 2) * scaleFactor, 0f)
@@ -109,7 +110,6 @@ class WebtoonTranslationsView :
                 )
             }
 
-            // PASS 2: Draw all text content on top (Layer 2)
             translation.blocks.forEach { block ->
                 SmartTranslationBlock(
                     modifier = Modifier.zIndex(2f),

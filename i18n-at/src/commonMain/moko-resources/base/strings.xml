@@ -18,6 +18,8 @@
     <string name="pref_group_advanced">Advanced Settings</string>
     <string name="pref_engine_model">LLM Model</string>
     <string name="pref_engine_temperature">LLM Temperature</string>
+    <string name="pref_engine_top_k">LLM Top K</string>
+    <string name="pref_engine_top_p">LLM Top P</string>
     <string name="pref_engine_max_output">LLM Max Output Token Count</string>
     <string name="pref_engine_system_prompt">LLM System Prompt</string>
     <string name="pref_group_logs">Logs</string>

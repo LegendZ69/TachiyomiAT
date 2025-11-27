@@ -26,7 +26,9 @@ enum class TextTranslators(val label: String) {
         toLang: TextTranslatorLanguage = TextTranslatorLanguage.fromPref(pref.translateToLanguage()),
     ): TextTranslator {
         val maxOutputTokens = pref.translationEngineMaxOutputTokens().get().toIntOrNull() ?: 8192
-        val temperature = pref.translationEngineTemperature().get().toFloatOrNull() ?: 1.0f
+        val temperature = pref.translationEngineTemperature().get().toFloatOrNull() ?: 0.5f
+        val topK = pref.translationEngineTopK().get().toIntOrNull() ?: 30
+        val topP = pref.translationEngineTopP().get().toFloatOrNull() ?: 0.95f
         val modelName = pref.translationEngineModel().get()
         val apiKey = pref.translationEngineApiKey().get()
         val systemPrompt = pref.translationEngineSystemPrompt().get()
@@ -34,7 +36,7 @@ enum class TextTranslators(val label: String) {
         return when (this) {
             MLKIT -> MLKitTranslator(fromLang, toLang)
             GOOGLE -> GoogleTranslator(fromLang, toLang)
-            GEMINI -> GeminiTranslator(fromLang, toLang, apiKey, modelName, maxOutputTokens, temperature, systemPrompt)
+            GEMINI -> GeminiTranslator(fromLang, toLang, apiKey, modelName, maxOutputTokens, temperature, topK, topP, systemPrompt)
             OPENROUTER -> OpenRouterTranslator(fromLang, toLang, apiKey, modelName, maxOutputTokens, temperature, systemPrompt)
         }
     }

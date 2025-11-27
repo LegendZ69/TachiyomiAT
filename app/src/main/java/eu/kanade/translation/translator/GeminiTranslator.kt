@@ -28,6 +28,8 @@ class GeminiTranslator(
     private val modelName: String,
     val maxOutputToken: Int,
     val temp: Float,
+    val topK: Int,
+    val topP: Float,
     val systemPrompt: String,
 ) : TextTranslator {
 
@@ -38,8 +40,8 @@ class GeminiTranslator(
         modelName = modelName,
         apiKey = apiKey,
         generationConfig = generationConfig {
-            topK = 30
-            topP = 0.5f
+            topK = this@GeminiTranslator.topK
+            topP = this@GeminiTranslator.topP
             temperature = temp
             maxOutputTokens = maxOutputToken
             responseMimeType = "application/json"
@@ -71,17 +73,12 @@ class GeminiTranslator(
             logManager.log(LogLevel.DEBUG, "GeminiTranslator", "Response JSON: $responseText")
 
             val resJson = try {
-                json.parseToJsonElement(responseText) as? JsonObject
+                val cleanJson = extractJson(responseText)
+                json.parseToJsonElement(cleanJson) as? JsonObject
             } catch (e: Exception) {
                 logManager.log(LogLevel.ERROR, "GeminiTranslator", "Failed to parse Gemini response: $responseText", e)
                 logcat(LogPriority.ERROR) { "Failed to parse Gemini response: $responseText" }
-                // Try a cleaner approach to extract JSON if it's wrapped in markdown code blocks
-                val cleanResponse = responseText.trim().removePrefix("```json").removeSuffix("```").trim()
-                 try {
-                    json.parseToJsonElement(cleanResponse) as? JsonObject
-                } catch (e2: Exception) {
-                    throw e
-                }
+                throw e
             }
 
             if (resJson != null) {
@@ -103,6 +100,25 @@ class GeminiTranslator(
             logcat(LogPriority.ERROR) { "Gemini Translation Error: ${e.stackTraceToString()}" }
             throw e
         }
+    }
+
+    private fun extractJson(text: String): String {
+        // Try matching markdown code blocks first
+        val jsonPattern = Regex("```json(.*?)```", RegexOption.DOT_MATCHES_ALL)
+        val match = jsonPattern.find(text)
+        if (match != null) {
+            return match.groupValues[1].trim()
+        }
+        
+        // Fallback: look for the first { and last }
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start != -1 && end != -1 && start < end) {
+            return text.substring(start, end + 1)
+        }
+        
+        // Return original if no structure found, let parser fail
+        return text.trim()
     }
 
     override fun close() {

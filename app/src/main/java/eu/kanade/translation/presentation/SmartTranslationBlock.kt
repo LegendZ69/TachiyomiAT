@@ -31,9 +31,19 @@ fun SmartTranslationBlock(
 ) {
     if (block.translation.isBlank()) return
 
-    // Padding constants - MUST match those in PagerTranslationsView and WebtoonTranslationsView
-    val padX = block.symWidth
-    val padY = block.symHeight * 0.75f
+    // Adjusted Padding: 
+    // Reduced significantly to prevent overlapping.
+    // 'padX' is now just a fraction of symWidth to add breathing room without expansion.
+    // 'padY' is also reduced.
+    val padX = block.symWidth * 0.5f 
+    val padY = block.symHeight * 0.5f
+    
+    // Adjusted Coordinates:
+    // Centering logic adjustment. 
+    // The previous TopStart logic with offset assumed (x,y) is top-left of the bounding box including padding.
+    // If we add padding, we must subtract half of it from x/y to center the new larger box over the old one.
+    // However, to fix "below/above" issues, we need to trust the original bbox more.
+    // Let's stick closer to the original block.x and block.y without aggressive padding offsets.
     
     val xPx = max((block.x - padX / 2) * scaleFactor, 0.0f)
     val yPx = max((block.y - padY / 2) * scaleFactor, 0.0f)
@@ -73,13 +83,12 @@ fun SmartTranslationBlock(
                         textAlign = TextAlign.Center,
                         maxLines = Int.MAX_VALUE,
                         softWrap = true,
+                        lineHeight = mid.sp, // Explicitly set line height to match font size for tighter fit
                     )
                 }[0].measure(Constraints(maxWidth = maxWidthPx))
 
-                // STRICT check: height must be <= maxHeightPx
-                // AND width must be <= maxWidthPx (implicitly handled by measure constraints, 
-                // but if softWrap fails or single word is too long, it might overflow width)
-                if (textLayoutResult.height <= maxHeightPx) {
+                // Added tolerance 1.1f to allow slightly more text if it fits visually
+                if (textLayoutResult.height <= maxHeightPx * 1.1f) {
                     bestSize = mid
                     low = mid + 1
                 } else {
@@ -88,7 +97,6 @@ fun SmartTranslationBlock(
             }
             fontSize.value = bestSize.sp
 
-            // Measure final layout
             val textPlaceable = subcompose(Unit) {
                 Text(
                     text = block.translation,
@@ -96,15 +104,20 @@ fun SmartTranslationBlock(
                     fontFamily = fontFamily,
                     color = Color.Black,
                     softWrap = true,
-                    overflow = TextOverflow.Visible, // Should fit due to calculation above
+                    overflow = TextOverflow.Visible,
                     textAlign = TextAlign.Center,
                     maxLines = Int.MAX_VALUE,
-                    modifier = Modifier.requiredSize(width, height)
+                    lineHeight = fontSize.value,
+                    modifier = Modifier.requiredSize(width, height) // Force size match
                 )
             }[0].measure(constraints)
 
+            // Center the text vertically if there's extra space, though textAlign handles horizontal.
+            // Box alignment handles this, but explicit placement is safer.
+            val yOffset = (constraints.maxHeight - textPlaceable.height) / 2
+            
             layout(textPlaceable.width, textPlaceable.height) {
-                textPlaceable.place(0, 0)
+                textPlaceable.place(0, yOffset.coerceAtLeast(0))
             }
         }
     }

@@ -45,10 +45,11 @@ class PagerTranslationsView :
     ) : super(context, attrs, defStyleAttr) {
         this.translation = PageTranslation.EMPTY
         this.font = TranslationFont.ANIME_ACE
-        this.fontFamily = Font(
-            resId = font.res,
-            weight = FontWeight.Bold,
-        ).toFontFamily()
+        this.fontFamily = if (font.res != null) {
+            Font(resId = font.res!!, weight = FontWeight.Bold).toFontFamily()
+        } else {
+            FontFamily.Default
+        }
     }
 
     constructor(
@@ -60,10 +61,11 @@ class PagerTranslationsView :
     ) : super(context, attrs, defStyleAttr) {
         this.translation = translation
         this.font = font ?: TranslationFont.ANIME_ACE
-        this.fontFamily = Font(
-            resId = this.font.res,
-            weight = FontWeight.Bold,
-        ).toFontFamily()
+        this.fontFamily = if (this.font.res != null) {
+            Font(resId = this.font.res!!, weight = FontWeight.Bold).toFontFamily()
+        } else {
+            FontFamily.Default
+        }
     }
 
     val scaleState = MutableStateFlow(1f)
@@ -79,11 +81,10 @@ class PagerTranslationsView :
                 .absoluteOffset(viewTL.x.pxToDp(), viewTL.y.pxToDp())
                 .zIndex(100f),
         ) {
-            // PASS 1: Draw all backgrounds first (Layer 1)
-            // This ensures no white box covers any text from another block
             translation.blocks.forEach { block ->
-                val padX = block.symWidth
-                val padY = block.symHeight * 0.75f
+                // Matched padding with SmartTranslationBlock
+                val padX = block.symWidth * 0.5f 
+                val padY = block.symHeight * 0.5f
                 val zoomScale = scale
                 
                 val bgX = max((block.x - padX / 2) * zoomScale, 0f)
@@ -103,7 +104,6 @@ class PagerTranslationsView :
                 )
             }
 
-            // PASS 2: Draw all text content on top (Layer 2)
             translation.blocks.forEach { block ->
                 SmartTranslationBlock(
                     modifier = Modifier.zIndex(2f),
