@@ -19,14 +19,50 @@ object TranslationUtils {
             return match.groupValues[1].trim()
         }
         
-        // Fallback: look for the first { and last }
         val start = text.indexOf('{')
+        if (start == -1) return text.trim()
+        
+        // Brace counting to find the matching closing brace
+        var braceCount = 0
+        var inString = false
+        var isEscaped = false
+        
+        for (i in start until text.length) {
+            val char = text[i]
+            
+            if (isEscaped) {
+                isEscaped = false
+                continue
+            }
+            
+            if (char == '\\') {
+                isEscaped = true
+                continue
+            }
+            
+            if (char == '"') {
+                inString = !inString
+                continue
+            }
+            
+            if (!inString) {
+                if (char == '{') {
+                    braceCount++
+                } else if (char == '}') {
+                    braceCount--
+                    if (braceCount == 0) {
+                        return text.substring(start, i + 1)
+                    }
+                }
+            }
+        }
+        
+        // Fallback: look for the last } if counting failed (e.g. malformed or unbalanced)
         val end = text.lastIndexOf('}')
-        if (start != -1 && end != -1 && start < end) {
+        if (end != -1 && start < end) {
             return text.substring(start, end + 1)
         }
         
-        // Return original if no structure found, let parser fail
-        return text.trim()
+        return text.substring(start)
     }
 }
