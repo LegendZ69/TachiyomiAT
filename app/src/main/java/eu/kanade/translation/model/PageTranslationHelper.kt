@@ -13,9 +13,9 @@ class PageTranslationHelper {
          */
         fun smartMergeBlocks(
             blocks: List<TranslationBlock>,
-            widthThreshold: Int = 50,
-            xThreshold: Int = 30,
-            yThreshold: Int = 30,
+            widthThreshold: Int = 100, // Increased threshold
+            xThreshold: Int = 50, // Increased threshold
+            yThreshold: Int = 50, // Increased threshold
         ): MutableList<TranslationBlock> {
             if (blocks.isEmpty()) return mutableListOf()
 
@@ -48,10 +48,10 @@ class PageTranslationHelper {
             yThreshold: Int,
         ): Boolean {
             // Check if widths are similar or if one is significantly smaller (e.g. punctuation or short line)
-            val isWidthSimilar = (b.width < a.width) || (abs(a.width - b.width) < widthThreshold)
-            
-            // Check horizontal alignment (X coordinate)
-            val isXClose = abs(a.x - b.x) < xThreshold
+            // Or if they are just close horizontally
+            val isXClose = abs(a.x - b.x) < xThreshold || 
+                           abs((a.x + a.width) - (b.x + b.width)) < xThreshold ||
+                           (a.x < b.x + b.width && a.x + a.width > b.x) // Horizontal Overlap
             
             // Check vertical proximity. 
             // b.y should be greater than a.y since we sorted, but we check the gap.
@@ -60,7 +60,7 @@ class PageTranslationHelper {
             val gap = b.y - (a.y + a.height)
             val isYClose = gap < yThreshold
 
-            return isWidthSimilar && isXClose && isYClose
+            return isXClose && isYClose
         }
 
         private fun mergeTextBlock(a: TranslationBlock, b: TranslationBlock): TranslationBlock {
@@ -120,13 +120,25 @@ class PageTranslationHelper {
 
         private fun shouldMergeOverlap(r1: TranslationBlock, r2: TranslationBlock): Boolean {
              // 1. Angle Check: Are they roughly parallel?
-            if (abs(r1.angle - r2.angle) > 10) return false
+            if (abs(r1.angle - r2.angle) > 20) return false
 
             // 2. Overlap Check: Do their bounding boxes intersect significantly?
-            val intersects = r1.x < (r2.x + r2.width) &&
-                (r1.x + r1.width) > r2.x &&
-                r1.y < (r2.y + r2.height) &&
-                (r1.y + r1.height) > r2.y
+            // Expand boxes slightly for intersection check
+            val margin = 10f
+            val r1Left = r1.x - margin
+            val r1Right = r1.x + r1.width + margin
+            val r1Top = r1.y - margin
+            val r1Bottom = r1.y + r1.height + margin
+
+            val r2Left = r2.x
+            val r2Right = r2.x + r2.width
+            val r2Top = r2.y
+            val r2Bottom = r2.y + r2.height
+            
+            val intersects = r1Left < r2Right &&
+                r1Right > r2Left &&
+                r1Top < r2Bottom &&
+                r1Bottom > r2Top
             
             return intersects
         }

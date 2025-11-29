@@ -6,11 +6,6 @@ import eu.kanade.translation.logs.TranslationLogManager
 import eu.kanade.translation.model.PageTranslation
 import eu.kanade.translation.recognizer.TextRecognizerLanguage
 import eu.kanade.translation.util.TranslationUtils
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.addJsonObject
@@ -47,9 +42,9 @@ class OpenRouterTranslator(
 ) : TextTranslator {
     
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(120, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(6, TimeUnit.MINUTES)
+        .readTimeout(6, TimeUnit.MINUTES)
+        .writeTimeout(6, TimeUnit.MINUTES)
         .build()
         
     private val json = Json { ignoreUnknownKeys = true }
@@ -58,44 +53,19 @@ class OpenRouterTranslator(
     override suspend fun translate(pages: MutableMap<String, PageTranslation>) {
         if (pages.isEmpty()) return
 
-        // Optimized concurrency for generic OpenRouter/LLM endpoints
-        val batchSize = 12
-        val parallelism = 3
-        val semaphore = Semaphore(parallelism)
-        
-        val pageEntries = pages.entries.toList()
-
-        try {
-            coroutineScope {
-                pageEntries.chunked(batchSize).map { batch ->
-                    async {
-                        semaphore.withPermit {
-                            val batchMap = batch.associate { it.key to it.value }
-                            translateBatch(batchMap)
-                        }
-                    }
-                }.awaitAll()
-            }
-        } catch (e: Exception) {
-            logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Translation job failed", e)
-            throw e
-        }
-    }
-
-    private suspend fun translateBatch(pages: Map<String, PageTranslation>) {
         try {
             val data = pages.mapValues { (_, v) -> v.blocks.map { b -> b.text } }
             val jsonString = json.encodeToString(data)
             
-            logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Sending request to OpenRouter model: $modelName (Batch size: ${pages.size})")
-            logManager.log(LogLevel.DEBUG, "OpenRouterTranslator", "Input JSON: $jsonString")
+            logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Preparing translation for ${pages.size} pages using $modelName")
+            logManager.log(LogLevel.DEBUG, "OpenRouterTranslator", "Input Data Size: ${jsonString.length} chars")
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val requestBodyJson = buildJsonObject {
                 put("model", modelName)
                 putJsonObject("response_format") { put("type", "json_object") }
-                put("top_p", 0.5f)
-                put("top_k", 30)
+                put("top_p", topP)
+                put("top_k", topK)
                 put("temperature", temp)
                 put("max_tokens", maxOutputToken)
                 put("presence_penalty", presencePenalty)
@@ -125,23 +95,49 @@ class OpenRouterTranslator(
                 .post(body)
                 .build()
 
+            logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Sending request...")
+            val startTime = System.currentTimeMillis()
             val response = okHttpClient.newCall(request).await()
-            val responseBody = response.body.string()
+            val endTime = System.currentTimeMillis()
+            val duration = (endTime - startTime) / 1000.0
             
-            logManager.log(LogLevel.DEBUG, "OpenRouterTranslator", "Response Body: $responseBody")
+            logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Response received. Status: ${response.code}. Time: ${duration}s")
+            
+            val responseBody = response.body.string()
+            logManager.log(LogLevel.DEBUG, "OpenRouterTranslator", "Raw Response Body: $responseBody")
+
+            if (!response.isSuccessful) {
+                logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "HTTP Request Failed: ${response.code} - $responseBody")
+                throw Exception("API Error ${response.code}: $responseBody")
+            }
 
             val responseJson = json.parseToJsonElement(responseBody).jsonObject
-            val contentString = responseJson["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+            val choices = responseJson["choices"]?.jsonArray
+            
+            if (choices.isNullOrEmpty()) {
+                // Detailed error extraction
+                val errorMsg = if (responseJson.containsKey("error")) {
+                    responseJson["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull ?: "Unknown Error"
+                } else {
+                    "No choices returned"
+                }
+                logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "API returned error: $errorMsg")
+                throw Exception(errorMsg)
+            }
+
+            val contentString = choices[0].jsonObject
+                .get("message")?.jsonObject
+                ?.get("content")?.jsonPrimitive?.contentOrNull
             
             if (contentString != null) {
                 val resJson = try {
                     TranslationUtils.extractAndParseJson(contentString)
                 } catch (e: Exception) {
-                    logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Failed to parse OpenRouter response content: $contentString", e)
-                    logcat(LogPriority.ERROR) { "Failed to parse OpenRouter response content: $contentString" }
+                    logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Failed to parse JSON from content: $contentString", e)
                     throw e
                 }
 
+                var successCount = 0
                 for ((k, v) in pages) {
                     val translationsArray = resJson[k]?.jsonArray
                     if (translationsArray != null) {
@@ -150,20 +146,18 @@ class OpenRouterTranslator(
                             b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
                         }
                          v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
+                         successCount++
                     } else {
-                         logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Missing translations for page: $k")
+                         logManager.log(LogLevel.WARN, "OpenRouterTranslator", "No translation found for page key: $k")
                     }
                 }
+                logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Successfully applied translations to $successCount pages")
             } else {
-                 logManager.log(LogLevel.WARN, "OpenRouterTranslator", "Content string is null in response")
-                 if (responseJson.containsKey("error")) {
-                      val error = responseJson["error"]?.jsonObject
-                      val message = error?.get("message")?.jsonPrimitive?.contentOrNull
-                      logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "API Error: $message")
-                 }
+                 logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Content string is null in response")
+                 throw Exception("Empty content in response")
             }
         } catch (e: Exception) {
-            logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "OpenRouter Translation Error", e)
+            logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Translation Process Error", e)
             logcat(LogPriority.ERROR) { "OpenRouter Translation Error: ${e.stackTraceToString()}" }
             throw e
         }

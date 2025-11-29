@@ -39,11 +39,6 @@ fun SmartTranslationBlock(
     val width = ((block.width + padX) * scaleFactor).pxToDp()
     val height = ((block.height + padY) * scaleFactor).pxToDp()
     
-    // Removed rotation to ensure alignment with AABB (Axis Aligned Bounding Box)
-    // The bounding box from ML Kit covers the text area in standard coordinates. 
-    // Rotating it typically causes misalignment unless we rotate the text content only, 
-    // but typically we want horizontal translations overlaying the area.
-
     Box(
         modifier = modifier
             .wrapContentSize(Alignment.TopStart, true)
@@ -87,7 +82,6 @@ fun SmartTranslationBlock(
             }
             fontSize.value = bestSize.sp
 
-            // Measure final layout without forcing height, to allow centering
             val textPlaceable = subcompose(Unit) {
                 Text(
                     text = block.translation,

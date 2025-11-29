@@ -50,12 +50,10 @@ class TranslationManager(
 
     fun pauseTranslation() {
         translator.pause()
-        translator.stop()
     }
 
     fun clearQueue() {
         translator.clearQueue()
-        translator.stop()
     }
 
     fun getQueuedTranslationOrNull(chapterId: Long): Translation? {

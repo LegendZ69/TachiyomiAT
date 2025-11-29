@@ -16,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.AbstractComposeView
@@ -98,7 +97,6 @@ class WebtoonTranslationsView :
                 val bgWidth = (block.width + padX) * scaleFactor
                 val bgHeight = (block.height + padY) * scaleFactor
                 
-                // Removed rotation here as well
                 Box(
                     modifier = Modifier
                         .wrapContentSize(Alignment.TopStart, true)

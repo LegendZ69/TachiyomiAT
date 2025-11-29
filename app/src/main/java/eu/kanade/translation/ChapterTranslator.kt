@@ -130,7 +130,7 @@ class ChapterTranslator(
                     if (activeTranslations.isEmpty()) break
                     val activeTranslationsErroredFlow =
                         combine(activeTranslations.map(Translation::statusFlow)) { states ->
-                            states.contains(Translation.State.ERROR)
+                            states.contains(Translation.State.ERROR) || states.contains(Translation.State.TRANSLATED)
                         }.filter { it }
                     activeTranslationsErroredFlow.first()
                 }
@@ -170,14 +170,8 @@ class ChapterTranslator(
             logManager.log(LogLevel.ERROR, "ChapterTranslator", "Translation failed for chapter: ${translation.chapter.name} (${translation.manga.title})", e)
             logcat(LogPriority.ERROR, e)
             
-            // Fix: Do NOT call stop() here. 
-            // calling stop() cancels the entire translation job (queue processing).
-            // We just want to mark THIS item as error, so the flow picks up the next one.
             translation.status = Translation.State.ERROR
             
-            // Optionally, check if this was the last item and stop if needed, 
-            // but areAllTranslationsFinished() check above handles successful completion.
-            // If all remaining items error out, the queue remains with ERROR items.
             if (areAllTranslationsFinished()) {
                 stop()
             }
@@ -282,7 +276,6 @@ class ChapterTranslator(
 
             translation.status = Translation.State.TRANSLATED
         } catch (error: Throwable) {
-            // Log and rethrow so the outer scope handles state update
             logManager.log(LogLevel.ERROR, "ChapterTranslator", "Error translating chapter: ${error.message}", error)
             logcat(LogPriority.ERROR, error)
             throw error
@@ -324,7 +317,7 @@ class ChapterTranslator(
         if (chapterPath.isFile) {
             val reader = chapterPath.archiveReader(context)
             return reader.useEntries { entries ->
-                entries.filter { it.isFile && ImageUtil.isImage(it.name) { reader.getInputStream(it.name)!! } }
+                entries.filter { it.isFile && ImageUtil.isImage(it.name) }
                     .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }.map { entry ->
                         PageData.Stream(entry.name) { reader.getInputStream(entry.name)!! }
                     }.toList()

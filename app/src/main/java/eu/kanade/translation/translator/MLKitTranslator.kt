@@ -48,28 +48,34 @@ class MLKitTranslator(
             // Using withContext(Dispatchers.IO) to ensure we don't block main thread even if called from there (though should be background)
             withContext(Dispatchers.IO) {
                 try {
-                    Tasks.await(client.downloadModelIfNeeded(conditions), 2, TimeUnit.MINUTES)
+                    Tasks.await(client.downloadModelIfNeeded(conditions), 5, TimeUnit.MINUTES)
                 } catch (e: TimeoutException) {
                     throw Exception("Model download timed out", e)
                 }
             }
             
+            logManager.log(LogLevel.INFO, "MLKitTranslator", "Model ready. Starting translation...")
+
             pages.mapValues { (_, v) ->
-                v.blocks.map { b ->
+                v.blocks.forEach { b ->
                     try {
+                        if (b.text.isBlank()) return@forEach
+
                         // Split by newlines to translate each line separately if needed, or translate whole block
                         // Translating line by line might preserve formatting better for speech bubbles
-                        val translatedText = b.text.split("\n").mapNotNull { line ->
-                             if (line.isBlank()) null else {
-                                 try {
-                                     // Tasks.await is blocking, so we are blocking the IO thread, which is fine for this operation
-                                     Tasks.await(client.translate(line)).takeIf { it.isNotEmpty() }
-                                 } catch (e: Exception) {
-                                     logManager.log(LogLevel.WARN, "MLKitTranslator", "Failed to translate line: '${line.take(20)}...'", e)
-                                     null
+                        val translatedText = withContext(Dispatchers.IO) {
+                             b.text.split("\n").mapNotNull { line ->
+                                 if (line.isBlank()) null else {
+                                     try {
+                                         // Tasks.await is blocking, so we are blocking the IO thread, which is fine for this operation
+                                         Tasks.await(client.translate(line)).takeIf { it.isNotEmpty() }
+                                     } catch (e: Exception) {
+                                         logManager.log(LogLevel.WARN, "MLKitTranslator", "Failed to translate line: '${line.take(20)}...'", e)
+                                         null
+                                     }
                                  }
-                             }
-                        }.joinToString("\n")
+                            }.joinToString("\n")
+                        }
                         
                         b.translation = if (translatedText.isNotBlank()) translatedText else b.text
                     } catch (e: Exception) {
@@ -79,6 +85,8 @@ class MLKitTranslator(
                     }
                 }
             }
+            logManager.log(LogLevel.INFO, "MLKitTranslator", "Translation finished.")
+
         } catch (e: Exception) {
              logManager.log(LogLevel.ERROR, "MLKitTranslator", "MLKit Translation Error", e)
              throw e

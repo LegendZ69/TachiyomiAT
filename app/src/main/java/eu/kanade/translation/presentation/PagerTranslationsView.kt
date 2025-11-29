@@ -90,7 +90,6 @@ class PagerTranslationsView :
                 val bgWidth = (block.width + padX) * zoomScale
                 val bgHeight = (block.height + padY) * zoomScale
                 
-                // Removed rotation here as well to match SmartTranslationBlock alignment
                 Box(
                     modifier = Modifier
                         .wrapContentSize(Alignment.TopStart, true)

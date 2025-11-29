@@ -113,13 +113,19 @@ object SettingsTranslationScreen : SearchableSettings {
         val scope = rememberCoroutineScope()
         var models by remember { mutableStateOf<List<String>?>(null) }
         
-        // Updated default list for Gemini 2 and 3 series
+        // Updated default list for Gemini 2 and 3 series and modern models
         val defaultModels = listOf(
             "gemini-2.0-flash", 
             "gemini-2.0-flash-lite",
             "gemini-2.0-pro-exp-02-05",
             "gemini-1.5-flash",
-            "gemini-1.5-pro"
+            "gemini-1.5-pro",
+            "deepseek/deepseek-r1-distill-llama-70b:free",
+            "deepseek/deepseek-r1-distill-llama-70b",
+            "google/gemini-2.0-flash-lite-preview-02-05:free",
+            "google/gemini-2.0-pro-exp-02-05:free",
+            "deepseek/deepseek-r1:free",
+            "google/gemini-2.0-flash-thinking-exp:free"
         )
         
         val apiKey = translationPreferences.translationEngineApiKey().get()
