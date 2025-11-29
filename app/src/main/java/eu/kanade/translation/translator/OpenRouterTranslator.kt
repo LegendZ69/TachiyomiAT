@@ -6,6 +6,11 @@ import eu.kanade.translation.logs.TranslationLogManager
 import eu.kanade.translation.model.PageTranslation
 import eu.kanade.translation.recognizer.TextRecognizerLanguage
 import eu.kanade.translation.util.TranslationUtils
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.addJsonObject
@@ -34,10 +39,13 @@ class OpenRouterTranslator(
     val modelName: String,
     val maxOutputToken: Int,
     val temp: Float,
+    val topK: Int,
+    val topP: Float,
+    val presencePenalty: Float,
+    val frequencyPenalty: Float,
     val systemPrompt: String,
 ) : TextTranslator {
     
-    // Increased timeout for long-running API calls
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(120, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -50,13 +58,27 @@ class OpenRouterTranslator(
     override suspend fun translate(pages: MutableMap<String, PageTranslation>) {
         if (pages.isEmpty()) return
 
-        // Batch processing to avoid timeouts and token limits
-        val batchSize = 5
+        // Optimized concurrency for generic OpenRouter/LLM endpoints
+        val batchSize = 12
+        val parallelism = 3
+        val semaphore = Semaphore(parallelism)
+        
         val pageEntries = pages.entries.toList()
 
-        for (batch in pageEntries.chunked(batchSize)) {
-            val batchMap = batch.associate { it.key to it.value }
-            translateBatch(batchMap)
+        try {
+            coroutineScope {
+                pageEntries.chunked(batchSize).map { batch ->
+                    async {
+                        semaphore.withPermit {
+                            val batchMap = batch.associate { it.key to it.value }
+                            translateBatch(batchMap)
+                        }
+                    }
+                }.awaitAll()
+            }
+        } catch (e: Exception) {
+            logManager.log(LogLevel.ERROR, "OpenRouterTranslator", "Translation job failed", e)
+            throw e
         }
     }
 
@@ -76,6 +98,8 @@ class OpenRouterTranslator(
                 put("top_k", 30)
                 put("temperature", temp)
                 put("max_tokens", maxOutputToken)
+                put("presence_penalty", presencePenalty)
+                put("frequency_penalty", frequencyPenalty)
                 putJsonArray("messages") {
                     addJsonObject {
                         put("role", "system")

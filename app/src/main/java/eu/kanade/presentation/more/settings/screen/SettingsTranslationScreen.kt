@@ -113,6 +113,7 @@ object SettingsTranslationScreen : SearchableSettings {
         val scope = rememberCoroutineScope()
         var models by remember { mutableStateOf<List<String>?>(null) }
         
+        // Updated default list for Gemini 2 and 3 series
         val defaultModels = listOf(
             "gemini-2.0-flash", 
             "gemini-2.0-flash-lite",
@@ -170,6 +171,14 @@ object SettingsTranslationScreen : SearchableSettings {
                 Preference.PreferenceItem.EditTextPreference(
                     pref = translationPreferences.translationEngineTopP(),
                     title = stringResource(ATMR.strings.pref_engine_top_p),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    pref = translationPreferences.translationEnginePresencePenalty(),
+                    title = stringResource(ATMR.strings.pref_engine_presence_penalty),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    pref = translationPreferences.translationEngineFrequencyPenalty(),
+                    title = stringResource(ATMR.strings.pref_engine_frequency_penalty),
                 ),
                 Preference.PreferenceItem.EditTextPreference(
                     pref = translationPreferences.translationEngineMaxOutputTokens(),
