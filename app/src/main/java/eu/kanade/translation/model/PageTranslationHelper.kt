@@ -19,8 +19,12 @@ class PageTranslationHelper {
         ): MutableList<TranslationBlock> {
             if (blocks.isEmpty()) return mutableListOf()
 
+            // Filter out blocks with empty text or very small dimensions (likely noise)
+            val validBlocks = blocks.filter { it.text.isNotBlank() && it.width > 2 && it.height > 2 }
+            if (validBlocks.isEmpty()) return mutableListOf()
+
             // Sort blocks by Y coordinate to process them top-down, which helps with the logic
-            val sortedBlocks = blocks.sortedBy { it.y }
+            val sortedBlocks = validBlocks.sortedBy { it.y }
             
             val merged = mutableListOf<TranslationBlock>()
             var current = sortedBlocks[0]
@@ -58,7 +62,10 @@ class PageTranslationHelper {
             // Gap = b.y - (a.y + a.height)
             // If they overlap vertically, the gap is negative, which is also fine for merging.
             val gap = b.y - (a.y + a.height)
-            val isYClose = gap < yThreshold
+            
+            // Use a dynamic threshold based on the height of the blocks (line height approximation)
+            val dynamicYThreshold = max(yThreshold.toFloat(), min(a.height, b.height) * 0.8f).toInt()
+            val isYClose = gap < dynamicYThreshold
 
             return isXClose && isYClose
         }
@@ -68,10 +75,21 @@ class PageTranslationHelper {
             val minY = min(a.y, b.y)
             val maxX = max(a.x + a.width, b.x + b.width)
             val maxY = max(a.y + a.height, b.y + b.height)
+            
+            val separator = if (a.text.endsWith("-") || b.text.startsWith("-")) "" else "\n"
+            val newText = "${a.text}$separator${b.text}"
+            
+            // For translation, join with newline to preserve structure for translator
+            // or space if we assume it's one sentence.
+            // Using newline is safer for preserving bubble structure in translation.
+            val transSeparator = if (a.translation.isNotBlank() && b.translation.isNotBlank()) "\n" else ""
+            val newTranslation = if (a.translation.isNotBlank() || b.translation.isNotBlank()) 
+                                    "${a.translation}$transSeparator${b.translation}".trim() 
+                                 else ""
 
             return TranslationBlock(
-                text = "${a.text}\n${b.text}",
-                translation = if (a.translation.isNotBlank() && b.translation.isNotBlank()) "${a.translation}\n${b.translation}" else "",
+                text = newText,
+                translation = newTranslation,
                 width = maxX - minX,
                 height = maxY - minY,
                 x = minX,
@@ -140,7 +158,24 @@ class PageTranslationHelper {
                 r1Top < r2Bottom &&
                 r1Bottom > r2Top
             
-            return intersects
+            if (!intersects) return false
+            
+            // Calculate Intersection Area to avoid merging things that just barely touch
+            val interLeft = max(r1Left, r2Left)
+            val interTop = max(r1Top, r2Top)
+            val interRight = min(r1Right, r2Right)
+            val interBottom = min(r1Bottom, r2Bottom)
+            
+            val interWidth = max(0f, interRight - interLeft)
+            val interHeight = max(0f, interBottom - interTop)
+            val interArea = interWidth * interHeight
+            
+            val r1Area = r1.width * r1.height
+            val r2Area = r2.width * r2.height
+            val minArea = min(r1Area, r2Area)
+            
+            // If intersection covers at least 30% of the smaller box, merge
+            return interArea > (minArea * 0.30f)
         }
     }
 }

@@ -132,7 +132,6 @@ class GeminiTranslator(
                 if (responseJson.containsKey("promptFeedback")) {
                     logManager.log(LogLevel.WARN, "GeminiTranslator", "Prompt Feedback: ${responseJson["promptFeedback"]}")
                 }
-                // Try to throw more descriptive error
                 throw Exception("No translation candidates returned. Check logs for details.")
             }
 
@@ -157,8 +156,6 @@ class GeminiTranslator(
                             val res = translationsArray.getOrNull(i)?.jsonPrimitive?.contentOrNull
                             b.translation = if (res.isNullOrEmpty() || res == "NULL") b.text else res
                         }
-                         // Filter out "RTMTH" or similar artifacts if your logic requires it.
-                         // Keeping it as is from user code, assuming RTMTH is some placeholder used in prompts or errors.
                          v.blocks = v.blocks.filterNot { it.translation.contains("RTMTH") }.toMutableList()
                          successCount++
                     } else {

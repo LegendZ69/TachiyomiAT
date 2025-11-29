@@ -4,7 +4,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
 object TranslationUtils {
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { 
+        ignoreUnknownKeys = true 
+        isLenient = true
+    }
 
     fun extractAndParseJson(text: String): JsonObject {
         val cleanJson = extractJsonString(text)
@@ -12,57 +15,22 @@ object TranslationUtils {
     }
 
     private fun extractJsonString(text: String): String {
-        // Try matching markdown code blocks first
-        val jsonPattern = Regex("```json(.*?)```", RegexOption.DOT_MATCHES_ALL)
+        // 1. Try matching markdown code blocks (most reliable for LLMs)
+        val jsonPattern = Regex("```(?:json)?\\s*(\\{[\\s\\S]*?\\})\\s*```", RegexOption.IGNORE_CASE)
         val match = jsonPattern.find(text)
         if (match != null) {
             return match.groupValues[1].trim()
         }
         
+        // 2. Locate the outermost braces
         val start = text.indexOf('{')
-        if (start == -1) return text.trim()
-        
-        // Brace counting to find the matching closing brace
-        var braceCount = 0
-        var inString = false
-        var isEscaped = false
-        
-        for (i in start until text.length) {
-            val char = text[i]
-            
-            if (isEscaped) {
-                isEscaped = false
-                continue
-            }
-            
-            if (char == '\\') {
-                isEscaped = true
-                continue
-            }
-            
-            if (char == '"') {
-                inString = !inString
-                continue
-            }
-            
-            if (!inString) {
-                if (char == '{') {
-                    braceCount++
-                } else if (char == '}') {
-                    braceCount--
-                    if (braceCount == 0) {
-                        return text.substring(start, i + 1)
-                    }
-                }
-            }
-        }
-        
-        // Fallback: look for the last } if counting failed (e.g. malformed or unbalanced)
         val end = text.lastIndexOf('}')
-        if (end != -1 && start < end) {
+        
+        if (start != -1 && end != -1 && end > start) {
             return text.substring(start, end + 1)
         }
         
-        return text.substring(start)
+        // 3. Fallback: Return original text (will likely fail parsing if not JSON)
+        return text.trim()
     }
 }
