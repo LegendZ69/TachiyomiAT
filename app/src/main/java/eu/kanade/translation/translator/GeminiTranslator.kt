@@ -17,7 +17,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
-import logcat.LogLevel as LogcatLevel
+import logcat.LogPriority
 import logcat.logcat
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -172,7 +172,7 @@ class GeminiTranslator(
             }
         } catch (e: Exception) {
             logManager.log(LogLevel.ERROR, "GeminiTranslator", "Translation Process Error", e)
-            logcat(LogcatLevel.ERROR) { "Gemini Translation Error: ${e.stackTraceToString()}" }
+            logcat(LogPriority.ERROR) { "Gemini Translation Error: ${e.stackTraceToString()}" }
             throw e
         }
     }
