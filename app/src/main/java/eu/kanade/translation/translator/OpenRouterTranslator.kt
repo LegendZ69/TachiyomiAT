@@ -25,6 +25,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeUnit
 
 class OpenRouterTranslator(
     override val fromLang: TextRecognizerLanguage,
@@ -36,18 +37,35 @@ class OpenRouterTranslator(
     val systemPrompt: String,
 ) : TextTranslator {
     
-    private val okHttpClient = OkHttpClient()
+    // Increased timeout for long-running API calls
+    private val okHttpClient = OkHttpClient.Builder()
+        .connectTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
+        .build()
+        
     private val json = Json { ignoreUnknownKeys = true }
     private val logManager = Injekt.get<TranslationLogManager>()
 
     override suspend fun translate(pages: MutableMap<String, PageTranslation>) {
         if (pages.isEmpty()) return
 
+        // Batch processing to avoid timeouts and token limits
+        val batchSize = 5
+        val pageEntries = pages.entries.toList()
+
+        for (batch in pageEntries.chunked(batchSize)) {
+            val batchMap = batch.associate { it.key to it.value }
+            translateBatch(batchMap)
+        }
+    }
+
+    private suspend fun translateBatch(pages: Map<String, PageTranslation>) {
         try {
             val data = pages.mapValues { (_, v) -> v.blocks.map { b -> b.text } }
             val jsonString = json.encodeToString(data)
             
-            logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Sending request to OpenRouter model: $modelName")
+            logManager.log(LogLevel.INFO, "OpenRouterTranslator", "Sending request to OpenRouter model: $modelName (Batch size: ${pages.size})")
             logManager.log(LogLevel.DEBUG, "OpenRouterTranslator", "Input JSON: $jsonString")
 
             val mediaType = "application/json; charset=utf-8".toMediaType()

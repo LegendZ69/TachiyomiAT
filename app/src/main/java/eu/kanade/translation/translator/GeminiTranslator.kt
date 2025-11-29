@@ -60,11 +60,22 @@ class GeminiTranslator(
     override suspend fun translate(pages: MutableMap<String, PageTranslation>) {
         if (pages.isEmpty()) return
 
+        // Batch processing to avoid timeouts and token limits
+        val batchSize = 5
+        val pageEntries = pages.entries.toList()
+
+        for (batch in pageEntries.chunked(batchSize)) {
+            val batchMap = batch.associate { it.key to it.value }
+            translateBatch(batchMap)
+        }
+    }
+
+    private suspend fun translateBatch(pages: Map<String, PageTranslation>) {
         try {
             val data = pages.mapValues { (_, v) -> v.blocks.map { b -> b.text } }
             val jsonString = json.encodeToString(data)
             
-            logManager.log(LogLevel.INFO, "GeminiTranslator", "Sending request to Gemini model: $modelName")
+            logManager.log(LogLevel.INFO, "GeminiTranslator", "Sending request to Gemini model: $modelName (Batch size: ${pages.size})")
             logManager.log(LogLevel.DEBUG, "GeminiTranslator", "Input JSON: $jsonString")
 
             val response = model.generateContent(jsonString)
