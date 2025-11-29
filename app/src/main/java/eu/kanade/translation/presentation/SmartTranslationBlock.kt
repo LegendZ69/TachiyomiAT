@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
@@ -31,33 +30,25 @@ fun SmartTranslationBlock(
 ) {
     if (block.translation.isBlank()) return
 
-    // Adjusted Padding: 
-    // Reduced significantly to prevent overlapping.
-    // 'padX' is now just a fraction of symWidth to add breathing room without expansion.
-    // 'padY' is also reduced.
     val padX = block.symWidth * 0.5f 
     val padY = block.symHeight * 0.5f
-    
-    // Adjusted Coordinates:
-    // Centering logic adjustment. 
-    // The previous TopStart logic with offset assumed (x,y) is top-left of the bounding box including padding.
-    // If we add padding, we must subtract half of it from x/y to center the new larger box over the old one.
-    // However, to fix "below/above" issues, we need to trust the original bbox more.
-    // Let's stick closer to the original block.x and block.y without aggressive padding offsets.
     
     val xPx = max((block.x - padX / 2) * scaleFactor, 0.0f)
     val yPx = max((block.y - padY / 2) * scaleFactor, 0.0f)
     
     val width = ((block.width + padX) * scaleFactor).pxToDp()
     val height = ((block.height + padY) * scaleFactor).pxToDp()
-    val isVertical = block.angle > 85
+    
+    // Removed rotation to ensure alignment with AABB (Axis Aligned Bounding Box)
+    // The bounding box from ML Kit covers the text area in standard coordinates. 
+    // Rotating it typically causes misalignment unless we rotate the text content only, 
+    // but typically we want horizontal translations overlaying the area.
 
     Box(
         modifier = modifier
             .wrapContentSize(Alignment.TopStart, true)
             .offset(xPx.pxToDp(), yPx.pxToDp())
             .requiredSize(width, height)
-            .rotate(if (isVertical) 0f else block.angle)
     ) {
         val density = LocalDensity.current
         val fontSize = remember { mutableStateOf(16.sp) }
@@ -83,11 +74,10 @@ fun SmartTranslationBlock(
                         textAlign = TextAlign.Center,
                         maxLines = Int.MAX_VALUE,
                         softWrap = true,
-                        lineHeight = mid.sp, // Explicitly set line height to match font size for tighter fit
+                        lineHeight = mid.sp,
                     )
                 }[0].measure(Constraints(maxWidth = maxWidthPx))
 
-                // Added tolerance 1.1f to allow slightly more text if it fits visually
                 if (textLayoutResult.height <= maxHeightPx * 1.1f) {
                     bestSize = mid
                     low = mid + 1
@@ -97,6 +87,7 @@ fun SmartTranslationBlock(
             }
             fontSize.value = bestSize.sp
 
+            // Measure final layout without forcing height, to allow centering
             val textPlaceable = subcompose(Unit) {
                 Text(
                     text = block.translation,
@@ -108,15 +99,12 @@ fun SmartTranslationBlock(
                     textAlign = TextAlign.Center,
                     maxLines = Int.MAX_VALUE,
                     lineHeight = fontSize.value,
-                    modifier = Modifier.requiredSize(width, height) // Force size match
                 )
-            }[0].measure(constraints)
+            }[0].measure(constraints.copy(minHeight = 0))
 
-            // Center the text vertically if there's extra space, though textAlign handles horizontal.
-            // Box alignment handles this, but explicit placement is safer.
             val yOffset = (constraints.maxHeight - textPlaceable.height) / 2
             
-            layout(textPlaceable.width, textPlaceable.height) {
+            layout(constraints.maxWidth, constraints.maxHeight) {
                 textPlaceable.place(0, yOffset.coerceAtLeast(0))
             }
         }

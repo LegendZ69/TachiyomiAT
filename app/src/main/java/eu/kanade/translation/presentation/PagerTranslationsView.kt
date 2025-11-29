@@ -15,7 +15,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.text.font.Font
@@ -82,7 +81,6 @@ class PagerTranslationsView :
                 .zIndex(100f),
         ) {
             translation.blocks.forEach { block ->
-                // Matched padding with SmartTranslationBlock
                 val padX = block.symWidth * 0.5f 
                 val padY = block.symHeight * 0.5f
                 val zoomScale = scale
@@ -91,14 +89,13 @@ class PagerTranslationsView :
                 val bgY = max((block.y - padY / 2) * zoomScale, 0f)
                 val bgWidth = (block.width + padX) * zoomScale
                 val bgHeight = (block.height + padY) * zoomScale
-                val isVertical = block.angle > 85
-
+                
+                // Removed rotation here as well to match SmartTranslationBlock alignment
                 Box(
                     modifier = Modifier
                         .wrapContentSize(Alignment.TopStart, true)
                         .offset(bgX.pxToDp(), bgY.pxToDp())
                         .requiredSize(bgWidth.pxToDp(), bgHeight.pxToDp())
-                        .rotate(if (isVertical) 0f else block.angle)
                         .background(Color.White, shape = RoundedCornerShape(4.dp))
                         .zIndex(1f)
                 )

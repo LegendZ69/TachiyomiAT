@@ -97,14 +97,13 @@ class WebtoonTranslationsView :
                 val bgY = max((block.y - padY / 2) * scaleFactor, 0f)
                 val bgWidth = (block.width + padX) * scaleFactor
                 val bgHeight = (block.height + padY) * scaleFactor
-                val isVertical = block.angle > 85
-
+                
+                // Removed rotation here as well
                 Box(
                     modifier = Modifier
                         .wrapContentSize(Alignment.TopStart, true)
                         .offset(bgX.pxToDp(), bgY.pxToDp())
                         .requiredSize(bgWidth.pxToDp(), bgHeight.pxToDp())
-                        .rotate(if (isVertical) 0f else block.angle)
                         .background(Color.White, shape = RoundedCornerShape(4.dp))
                         .zIndex(1f),
                 )

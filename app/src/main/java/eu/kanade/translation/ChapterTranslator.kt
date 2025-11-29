@@ -169,7 +169,18 @@ class ChapterTranslator(
             if (e is CancellationException) throw e
             logManager.log(LogLevel.ERROR, "ChapterTranslator", "Translation failed for chapter: ${translation.chapter.name} (${translation.manga.title})", e)
             logcat(LogPriority.ERROR, e)
-            stop()
+            
+            // Fix: Do NOT call stop() here. 
+            // calling stop() cancels the entire translation job (queue processing).
+            // We just want to mark THIS item as error, so the flow picks up the next one.
+            translation.status = Translation.State.ERROR
+            
+            // Optionally, check if this was the last item and stop if needed, 
+            // but areAllTranslationsFinished() check above handles successful completion.
+            // If all remaining items error out, the queue remains with ERROR items.
+            if (areAllTranslationsFinished()) {
+                stop()
+            }
         }
     }
 
@@ -196,8 +207,6 @@ class ChapterTranslator(
     private suspend fun translateChapter(translation: Translation) {
         translation.status = Translation.State.TRANSLATING
         try {
-            // Re-init engines if needed, synchronized to avoid race conditions if multiple jobs start (though ChapterTranslator is singleton per Manager)
-            // But let's keep it simple for now as this is called sequentially per worker usually
             if (textRecognizer == null || textRecognizer?.language != translation.fromLang) {
                 textRecognizer?.close()
                 textRecognizer = TextRecognizer(translation.fromLang)
@@ -225,7 +234,6 @@ class ChapterTranslator(
             val pages = mutableMapOf<String, PageTranslation>()
             val pageDataList = getChapterPages(chapterPath)
             
-            // Create a temp file for image processing if needed
             val tmpFile = translationMangaDir.createFile("tmp_processing_image") ?: throw Exception("Could not create temp file")
 
             try {
@@ -233,7 +241,6 @@ class ChapterTranslator(
                     for (pageData in pageDataList) {
                         coroutineContext.ensureActive()
                         
-                        // Optimized: If file exists on disk, use it directly. Otherwise extract stream to temp file.
                         val imageUri = when (pageData) {
                             is PageData.File -> pageData.uri
                             is PageData.Stream -> {
@@ -275,7 +282,7 @@ class ChapterTranslator(
 
             translation.status = Translation.State.TRANSLATED
         } catch (error: Throwable) {
-            translation.status = Translation.State.ERROR
+            // Log and rethrow so the outer scope handles state update
             logManager.log(LogLevel.ERROR, "ChapterTranslator", "Error translating chapter: ${error.message}", error)
             logcat(LogPriority.ERROR, error)
             throw error
